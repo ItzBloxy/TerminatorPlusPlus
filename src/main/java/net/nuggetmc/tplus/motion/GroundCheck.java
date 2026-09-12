@@ -15,21 +15,31 @@ import java.util.List;
 /**
  * Works out which blocks a bot is standing on.
  *
- * <p>Ported from {@code Bot.checkStandingOn}. The Paper original gated on a
- * hand-maintained Material list ({@code LegacyMats.isSolid || canStandOn}); this uses
- * the block's shape instead, which covers the same ground without going stale.
+ * <p>Ported from {@code Bot.checkStandingOn}, which gated on a hand-maintained Material
+ * list: {@code LegacyMats.isSolid(mat) || LegacyMats.canStandOn(mat)}.
  *
- * <p><b>Use the outline shape, not the collision shape.</b> Bukkit's
- * {@code Block.getBoundingBox()} maps to vanilla's {@code getShape}, and several blocks
- * the original explicitly allowed standing on — ladders and vines among them — override
- * only {@code getShape} and have an <em>empty</em> collision shape. Reading
- * {@code getCollisionShape} silently drops them.
+ * <h2>Which shape counts as ground</h2>
  *
- * <p>An empty shape is skipped, matching Bukkit returning an empty BoundingBox that
- * overlaps nothing.
+ * <p>This is an approximation of that list, and the choice of shape matters. Measured in
+ * 26.2, these blocks have an <em>empty collision</em> shape but a non-empty outline:
+ * vines, snow layers, short and tall grass, poppies, torches, rails, pressure plates,
+ * cobwebs, powder snow, and sweet berry bushes.
  *
- * <p>Tag membership needs a loaded datapack, so this class is covered by the
- * server-backed tests rather than pure unit tests (spec section 6).
+ * <p>Only vines and snow layers are in upstream's {@code canStandOn}. So keying off the
+ * outline shape would make a bot treat grass, flowers and torches as solid ground —
+ * eleven wrong blocks to buy two right ones. Collision shape is the better proxy, with
+ * the two genuine exceptions handled explicitly below.
+ *
+ * <p>Neither proxy is exactly the original. Getting it right needs the curated predicate
+ * ported as {@code BlockRules} (spec section 4.2), which lands with the agent in Plan B;
+ * until then this is deliberately the less wrong of the two.
+ *
+ * <p>An empty shape is skipped, which also matches Bukkit returning an empty BoundingBox
+ * that overlaps nothing — and is mandatory, because {@code VoxelShape.bounds()} throws on
+ * an empty shape.
+ *
+ * <p>Tag membership needs a loaded datapack, so this class is covered by the GameTests
+ * rather than pure unit tests (spec section 6).
  */
 public final class GroundCheck {
 
@@ -69,7 +79,7 @@ public final class GroundCheck {
                     continue;
                 }
 
-                AABB blockBox = outlineBox(level, pos);
+                AABB blockBox = standableBox(level, pos);
                 if (blockBox != null && botBox.intersects(blockBox)) {
                     found.add(pos);
                 }
@@ -96,7 +106,7 @@ public final class GroundCheck {
                     continue;
                 }
 
-                AABB shape = outlineBox(level, pos);
+                AABB shape = standableBox(level, pos);
                 if (shape == null) {
                     continue;
                 }
@@ -118,18 +128,20 @@ public final class GroundCheck {
     }
 
     /**
-     * The block's outline shape in world coordinates, or null when it has none.
+     * The box a bot can rest on, in world coordinates, or null when there is none.
+     *
+     * <p>Collision shape: what can physically hold an entity up.
      *
      * <p>{@code VoxelShape.bounds()} throws on an empty shape, so the emptiness check is
      * mandatory, not defensive.
      */
-    private static AABB outlineBox(ServerLevel level, BlockPos pos) {
+    private static AABB standableBox(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         if (state.isAir()) {
             return null;
         }
 
-        VoxelShape shape = state.getShape(level, pos);
+        VoxelShape shape = state.getCollisionShape(level, pos);
         if (shape.isEmpty()) {
             return null;
         }

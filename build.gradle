@@ -13,6 +13,14 @@ repositories {
     mavenCentral()
 }
 
+// In-world tests live in their own source set, not in main. NeoForge GameTests run
+// inside a real server, so they need the testframework dependency at dev runtime — but
+// neither the tests nor that dependency belong in a published jar. Keeping them here
+// means `jar` only ever contains main.
+sourceSets {
+    gametest
+}
+
 neoForge {
     version = project.neo_version
 
@@ -31,11 +39,16 @@ neoForge {
         }
     }
 
+    // Binding both source sets to the same mod id puts the gametest classes inside the
+    // 'tplus' mod container, which is what the testframework's annotation scan walks.
     mods {
         "${mod_id}" {
             sourceSet sourceSets.main
+            sourceSet sourceSets.gametest
         }
     }
+
+    addModdingDependenciesTo sourceSets.gametest
 
     unitTest {
         enable()
@@ -43,10 +56,21 @@ neoForge {
     }
 }
 
+// localRuntime lands on the dev run classpath but is not published, which is exactly
+// what the testframework needs: GameTests load it in-game, consumers of the mod never do.
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
+}
+
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.1.3'
     testImplementation "net.neoforged:testframework:${neo_version}"
+
+    gametestImplementation sourceSets.main.output
+    gametestImplementation "net.neoforged:testframework:${neo_version}"
+
+    localRuntime "net.neoforged:testframework:${neo_version}"
 }
 
 tasks.named('test', Test) {

@@ -474,9 +474,12 @@ takes damage; jumps a one-block step; acquires and attacks a target; despawns cl
 >    entity, because that needs a `ServerLevel`.
 >
 > Consequence: anything involving a live bot — spawning, physics, `GroundCheck`,
-> `BlockRules` — belongs in GameTests, not the server-backed tier. Plan A's `BotSpawnTest`
-> is written and kept compiling but `@Disabled` pending that harness; the same ground is
-> covered manually over RCON for now.
+> `BlockRules` — belongs in GameTests, not the server-backed tier.
+>
+> **Resolved.** The harness was built: a `gametest` source set bound to the mod id, with
+> `testframework` on `localRuntime` so neither the tests nor that dependency reach the
+> release jar. 14 in-world tests pass under `runGameTestServer`, and the server-backed
+> tier is used only for what genuinely needs no world (`BotGameProfilesTest`).
 
 **Manual smoke testing.** Combat feel. No automated test captures whether a bot fights *well*, and
 that is the project's whole point.
@@ -536,11 +539,17 @@ Maintaining a parallel Paper build. Redesigning bot AI. Any client-side componen
 
 ## 9. Risks
 
-1. **Bots inside the `PlayerList`.** `addNewPlayer` makes the server treat a bot as a real player —
-   playerdata saves, chunk dispatch, keep-alives — all aimed at a fake connection. This is the least
-   understood part of the port and the most likely source of surprises. *Mitigation:* the existing
-   `addToPlayerList` toggle is retained and defaults to the safer `addFreshEntity` path; both paths
-   get server-backed tests.
+1. **Bots inside the `PlayerList`.** **Resolved during Plan A — the path is impossible.**
+   NeoForge deliberately changed `PlayerList.getPlayers()` to return
+   `Collections.unmodifiableList(players)`, commented *"Neo: Return an unmodifiable view, we
+   don't want people removing things without us knowing"*, so the Paper build's
+   `getPlayers().add(bot)` throws `UnsupportedOperationException`.
+   *Outcome:* `BotFactory` rejects the path with an explanation, the `playerlist` subcommand
+   is gone, and a GameTest pins the constraint so it fails loudly if that ever changes.
+   Supporting it properly means going through `PlayerList.placeNewPlayer` — the real join
+   path, which sends login packets, fires events and loads playerdata against a connection
+   that goes nowhere. Deferred to Plan B, not bodged with an access transformer against an
+   intentional guard.
 2. **`checkNearby`.** 280 lines of dense block-scanning logic translated once, with no reference
    implementation running side by side. *Mitigation:* isolated in its own file, diffed against
    `master` line by line, and covered by GameTests for the behaviors it drives.

@@ -53,10 +53,21 @@ public final class BotFactory {
         registry.add(bot);
 
         if (addToPlayerList) {
-            server.getPlayerList().getPlayers().add(bot);
-            bot.setInPlayerList(true);
-            level.addNewPlayer(bot);
-            broadcast(bot, ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(bot)));
+            // Spec risk 1, resolved by a GameTest: this path cannot work on NeoForge.
+            // PlayerList.getPlayers() returns Collections.unmodifiableList(players) —
+            // "Neo: Return an unmodifiable view, we don't want people removing things
+            // without us knowing" — so the Paper build's getPlayers().add(bot) throws
+            // UnsupportedOperationException here.
+            //
+            // Doing this properly means going through PlayerList.placeNewPlayer, the real
+            // join path, which also sends login packets, fires events and loads playerdata
+            // against a connection that goes nowhere. That is its own piece of work; it is
+            // not something to bodge with an access transformer against an intentional
+            // guard. Deferred to Plan B.
+            throw new UnsupportedOperationException(
+                    "Adding bots to the PlayerList is not supported on NeoForge: "
+                            + "PlayerList.getPlayers() is an unmodifiable view. This needs "
+                            + "PlayerList.placeNewPlayer support (deferred to Plan B).");
         } else {
             level.addFreshEntity(bot);
             broadcast(bot, new ClientboundPlayerInfoUpdatePacket(

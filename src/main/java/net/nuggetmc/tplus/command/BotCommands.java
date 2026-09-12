@@ -51,9 +51,9 @@ public final class BotCommands {
                 .then(Commands.argument("name", StringArgumentType.string())
                         .executes(ctx -> create(ctx, 1, false))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
-                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false))
-                                .then(Commands.literal("playerlist")
-                                        .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), true))))));
+                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false)))));
+        // No 'playerlist' subcommand: that spawn path is unsupported on NeoForge
+        // (PlayerList.getPlayers() is an unmodifiable view). See BotFactory.spawn.
 
         root.then(Commands.literal("remove")
                 .then(Commands.argument("name", StringArgumentType.string())
