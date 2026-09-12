@@ -3,6 +3,8 @@ package net.nuggetmc.tplus.gametest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
 import net.neoforged.testframework.annotation.TestHolder;
@@ -129,6 +131,98 @@ public final class BotActionTests {
 
         helper.assertValueEqual(bot.getYRot(), before, "yaw must be unchanged, not NaN");
         helper.assertFalse(Float.isNaN(bot.getXRot()), "pitch must not be NaN");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    // ---- pose, animation and equipment -------------------------------------
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("sneak_then_stand_toggles_the_shift_flag")
+    static void sneak_then_stand_toggles_the_shift_flag(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        bot.sneak();
+        helper.assertTrue(bot.isShiftKeyDown(), "sneak must set the shift flag");
+
+        bot.stand();
+        helper.assertFalse(bot.isShiftKeyDown(), "stand must clear the shift flag");
+        helper.assertFalse(bot.isSwimming(), "stand must clear the swim flag too");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("swim_sets_the_swim_flag")
+    static void swim_sets_the_swim_flag(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        bot.swim();
+
+        helper.assertTrue(bot.isSwimming(), "swim must set the swim flag");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("set_item_puts_the_stack_in_the_main_hand")
+    static void set_item_puts_the_stack_in_the_main_hand(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        bot.setItem(new ItemStack(Items.DIAMOND_PICKAXE));
+
+        // PlayerEquipment routes MAINHAND to inventory.setSelectedItem, so both views agree.
+        helper.assertTrue(bot.getMainHandItem().is(Items.DIAMOND_PICKAXE), "main hand item");
+        helper.assertTrue(bot.getInventory().getSelectedItem().is(Items.DIAMOND_PICKAXE),
+                "the inventory's selected slot is the main hand for a player");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("a_null_item_restores_the_default_item")
+    static void a_null_item_restores_the_default_item(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        // Upstream's contract: setItem(null) means "go back to the default", and the agent
+        // relies on it — resetHand and move both call setItem(null) every few ticks to drop
+        // whatever tool the mining code put there.
+        bot.setDefaultItem(new ItemStack(Items.WOODEN_AXE));
+        bot.setItem(new ItemStack(Items.DIAMOND_PICKAXE));
+
+        bot.setItem(null);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.WOODEN_AXE),
+                "setItem(null) must restore the default item, not empty the hand");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("set_shield_equips_and_unequips_the_offhand")
+    static void set_shield_equips_and_unequips_the_offhand(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        bot.setShield(true);
+        helper.assertTrue(bot.getOffhandItem().is(Items.SHIELD), "offhand after enabling the shield");
+
+        bot.setShield(false);
+        helper.assertTrue(bot.getOffhandItem().isEmpty(), "offhand after disabling the shield");
 
         registry.reset();
         helper.succeed();

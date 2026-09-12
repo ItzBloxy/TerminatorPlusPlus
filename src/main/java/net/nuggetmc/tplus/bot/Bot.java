@@ -1,6 +1,7 @@
 package net.nuggetmc.tplus.bot;
 
 import com.mojang.authlib.GameProfile;
+import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
@@ -10,10 +11,16 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -52,6 +59,17 @@ public class Bot extends ServerPlayer {
     private byte noFallTicks = 60;
 
     private boolean inPlayerList;
+
+    /**
+     * What {@code setItem(null)} falls back to. Upstream initialised this to an AIR stack;
+     * the vanilla equivalent is {@code ItemStack.EMPTY}, which {@code ItemUtils} scores as
+     * bare fists — the same 0.25 damage the Paper build gave an AIR stack.
+     */
+    private ItemStack defaultItem = ItemStack.EMPTY;
+
+    private boolean shield;
+    private boolean blocking;
+    private boolean blockUse;
 
     /**
      * The registry that owns this bot. Set by {@link BotRegistry#add(Bot)} before the
@@ -246,6 +264,83 @@ public class Bot extends ServerPlayer {
         // Entity.setRot is protected in 26.2 — reachable here because Bot is a subclass, but
         // not from Navigation. That is why turning is a Bot method and not a helper.
         setRot(yaw, pitch);
+    }
+
+    // ---- pose, animation and equipment ------------------------------------
+
+    /** Swings the main hand. Vanilla broadcasts the animation packet for us. */
+    public void punch() {
+        swing(InteractionHand.MAIN_HAND);
+    }
+
+    public void swim() {
+        setSwimming(true);
+        registerPose(Pose.SWIMMING);
+    }
+
+    public void sneak() {
+        // Bukkit's setSneaking is vanilla's setShiftKeyDown; both set the same shared flag.
+        setShiftKeyDown(true);
+        registerPose(Pose.CROUCHING);
+    }
+
+    public void stand() {
+        setShiftKeyDown(false);
+        setSwimming(false);
+        registerPose(Pose.STANDING);
+    }
+
+    /**
+     * Deliberately empty, and deliberately kept.
+     *
+     * <p>Upstream's body is two commented-out statements — it has never done anything. Making
+     * it work would start syncing poses and, through {@code refreshDimensions}, start changing
+     * the bot's hitbox when it crouches. That is a behaviour change, not a bug fix, so it is
+     * out of scope for a faithful port. The parameter is retained so the call sites read the
+     * same as upstream's.
+     */
+    @SuppressWarnings("unused")
+    private void registerPose(Pose pose) {
+    }
+
+    public void setDefaultItem(ItemStack item) {
+        this.defaultItem = item;
+    }
+
+    /** Main hand. A null {@code item} means "restore the default item". */
+    public void setItem(ItemStack item) {
+        setItem(item, EquipmentSlot.MAINHAND);
+    }
+
+    public void setItemOffhand(ItemStack item) {
+        setItem(item, EquipmentSlot.OFFHAND);
+    }
+
+    /**
+     * Ported from {@code Bot.setItem(ItemStack, EquipmentSlot)}.
+     *
+     * <p>{@code setItemSlot} is the vanilla route for both slots: {@code PlayerEquipment.set}
+     * sends MAINHAND to {@code inventory.setSelectedItem} and everything else to the backing
+     * equipment map, so the inventory and the equipment view cannot disagree. The Paper build
+     * wrote the Bukkit inventory and then sent the packet; only the first half changes.
+     *
+     * <p>The equipment packet is still sent by hand, for the same reason the spawn packet is:
+     * bots are not announced to clients the way tracked players are.
+     */
+    public void setItem(ItemStack item, EquipmentSlot slot) {
+        ItemStack stack = item == null ? defaultItem : item;
+
+        setItemSlot(slot, stack);
+
+        BotFactory.broadcast(this, new ClientboundSetEquipmentPacket(
+                getId(), List.of(Pair.of(slot, stack))));
+    }
+
+    /** Puts a shield in the offhand and allows {@link #block(int, int)} to fire. */
+    public void setShield(boolean enabled) {
+        this.shield = enabled;
+
+        setItemOffhand(enabled ? new ItemStack(Items.SHIELD) : ItemStack.EMPTY);
     }
 
     void incrementAliveTicks() {
