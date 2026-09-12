@@ -15,6 +15,7 @@ import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.motion.MotionVec;
 
 /**
  * In-world tests for the bot action API.
@@ -223,6 +224,140 @@ public final class BotActionTests {
 
         bot.setShield(false);
         helper.assertTrue(bot.getOffhandItem().isEmpty(), "offhand after disabling the shield");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    // ---- velocity, combat and state ----------------------------------------
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("get_velocity_returns_a_copy_not_the_live_vector")
+    static void get_velocity_returns_a_copy_not_the_live_vector(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        bot.setVelocity(new MotionVec(0.1, 0.2, 0.3));
+
+        // The agent does exactly this — checkUp's `npc.getVelocity().add(vector)` mutates
+        // whatever it is handed. If that is the live vector, the bot's physics is corrupted
+        // from the first tick and nothing downstream reports why.
+        bot.getVelocity().add(new MotionVec(99, 99, 99));
+
+        helper.assertValueEqual(bot.getBotVelocity().getX(), 0.1, "x must be untouched");
+        helper.assertValueEqual(bot.getBotVelocity().getY(), 0.2, "y must be untouched");
+        helper.assertValueEqual(bot.getBotVelocity().getZ(), 0.3, "z must be untouched");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("set_velocity_writes_through_to_the_live_vector")
+    static void set_velocity_writes_through_to_the_live_vector(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        MotionVec live = bot.getBotVelocity();
+
+        bot.setVelocity(new MotionVec(1, 2, 3));
+
+        // The velocity field is final (BotPhysics holds and mutates it), so setVelocity
+        // copies component-wise rather than rebinding. Same observable result, and the
+        // reference BotPhysics captured stays valid.
+        helper.assertValueEqual(live.getY(), 2.0, "the same object must see the new value");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("walk_caps_the_combined_speed")
+    static void walk_caps_the_combined_speed(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        bot.setVelocity(new MotionVec(0.3, 0, 0.3));
+
+        bot.walk(new MotionVec(0.3, 0, 0.3));
+
+        // 0.6,0,0.6 has length 0.848; upstream normalised and scaled back to exactly 0.4.
+        helper.assertTrue(Math.abs(bot.getVelocity().length() - 0.4) < 1.0E-6,
+                "walk must clamp to 0.4, got " + bot.getVelocity().length());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("walk_below_the_cap_is_a_plain_sum")
+    static void walk_below_the_cap_is_a_plain_sum(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        bot.setVelocity(new MotionVec(0.1, 0, 0));
+
+        bot.walk(new MotionVec(0.1, 0, 0));
+
+        helper.assertTrue(Math.abs(bot.getVelocity().getX() - 0.2) < 1.0E-9,
+                "under the cap, walk just adds; got " + bot.getVelocity().getX());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("is_falling_is_the_minus_zero_point_eight_threshold")
+    static void is_falling_is_the_minus_zero_point_eight_threshold(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        bot.setVelocity(new MotionVec(0, -0.79, 0));
+        helper.assertFalse(bot.isFalling(), "-0.79 is not falling");
+
+        bot.setVelocity(new MotionVec(0, -0.81, 0));
+        helper.assertTrue(bot.isFalling(), "-0.81 is falling");
+
+        // The same constant gates fall damage in fallDamageCheck and the MLG attempt in
+        // BlockScan.tryPreMLG. Three behaviours hang off this number.
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("tick_delay_is_a_modulus_of_alive_ticks")
+    static void tick_delay_is_a_modulus_of_alive_ticks(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        // aliveTicks is 0 on spawn, and 0 % n == 0, so every delay fires on the first tick.
+        // The agent's "every 3 ticks" attack and "every 20 ticks" centring both rely on it.
+        helper.assertTrue(bot.tickDelay(3), "delay 3 must fire at tick 0");
+        helper.assertTrue(bot.tickDelay(20), "delay 20 must fire at tick 0");
+
+        bot.tick();
+        helper.assertFalse(bot.tickDelay(3), "delay 3 must not fire at tick 1");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("the_spawn_offset_is_inside_a_three_block_circle")
+    static void the_spawn_offset_is_inside_a_three_block_circle(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        // Every bot gets a fixed random offset at construction so a crowd of bots chasing
+        // one player spreads out instead of stacking. Upstream: MathUtils.circleOffset(3).
+        MotionVec offset = bot.getOffset();
+
+        helper.assertTrue(offset.length() <= 3.0 + 1.0E-9,
+                "offset must lie within radius 3, got " + offset.length());
+        helper.assertTrue(offset.getY() == 0.0, "the offset is horizontal, got " + offset.getY());
 
         registry.reset();
         helper.succeed();

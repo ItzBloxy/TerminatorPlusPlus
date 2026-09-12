@@ -12,16 +12,19 @@ import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -34,8 +37,10 @@ import net.nuggetmc.tplus.motion.BotPhysics;
 import net.nuggetmc.tplus.motion.GroundCheck;
 import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.util.BotUtils;
+import net.nuggetmc.tplus.util.ItemUtils;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * A server-side player bot.
@@ -66,6 +71,17 @@ public class Bot extends ServerPlayer {
      * bare fists — the same 0.25 damage the Paper build gave an AIR stack.
      */
     private ItemStack defaultItem = ItemStack.EMPTY;
+
+    /**
+     * A fixed random point in a radius-3 horizontal circle, chosen once per bot.
+     *
+     * <p>{@code LegacyAgent} adds it to the target's position when {@code offsets} is on, so a
+     * group of bots converges on a ring around the target instead of a single point.
+     */
+    private final MotionVec offset = BotMath.circleOffset(3);
+
+    private UUID targetPlayer;
+    private int kills;
 
     private boolean shield;
     private boolean blocking;
@@ -144,7 +160,7 @@ public class Bot extends ServerPlayer {
         this.jumpTicks = value;
     }
 
-    byte getNoFallTicks() {
+    public byte getNoFallTicks() {
         return noFallTicks;
     }
 
@@ -341,6 +357,183 @@ public class Bot extends ServerPlayer {
         this.shield = enabled;
 
         setItemOffhand(enabled ? new ItemStack(Items.SHIELD) : ItemStack.EMPTY);
+    }
+
+    // ---- velocity ---------------------------------------------------------
+
+    /**
+     * The bot's velocity, as a <b>copy</b>.
+     *
+     * <p>This is not the same thing as {@link #getBotVelocity()}, and the difference matters.
+     * {@code getBotVelocity} hands out the live vector because {@code BotPhysics.step} mutates
+     * it in place; that is the physics path. Agent code mutates whatever it is given —
+     * {@code Navigation.checkUp} does {@code getVelocity().add(v)} — so this path must copy or
+     * the agent silently rewrites the bot's motion. Upstream returned {@code velocity.clone()}
+     * here for exactly this reason.
+     */
+    public MotionVec getVelocity() {
+        return getBotVelocity().copy();
+    }
+
+    /**
+     * Replaces the velocity.
+     *
+     * <p>Upstream rebound the field. Ours is final, because {@code BotPhysics} captures it, so
+     * this copies component-wise instead. Observably identical, and it keeps that reference
+     * valid.
+     */
+    public void setVelocity(MotionVec vec) {
+        MotionVec live = getBotVelocity();
+        live.setX(vec.getX()).setY(vec.getY()).setZ(vec.getZ());
+    }
+
+    /**
+     * Adds {@code vel}, then clamps the total to 0.4.
+     *
+     * <p>Ported from {@code Bot.walk}. The clamp is a normalize-and-scale, so a vector already
+     * under the cap is unchanged.
+     */
+    public void walk(MotionVec vel) {
+        double max = 0.4;
+
+        MotionVec sum = getVelocity().add(vel);
+        if (sum.length() > max) {
+            sum.normalize().multiply(max);
+        }
+
+        setVelocity(sum);
+    }
+
+    // ---- combat -----------------------------------------------------------
+
+    /**
+     * Faces the target, swings, and applies 1.8 damage for whatever is in hand.
+     *
+     * <p>Ported from {@code Bot.attack}. The damage comes from {@link ItemUtils}, not from the
+     * item's real attack-damage attribute — see that class for why.
+     */
+    public void attack(LivingEntity target) {
+        faceLocation(target.position());
+        punch();
+
+        double damage = ItemUtils.getLegacyAttackDamage(defaultItem);
+
+        target.hurtServer((ServerLevel) level(), damageSources().playerAttack(this), (float) damage);
+    }
+
+    /**
+     * Raises the shield for {@code blockLength} ticks, then locks it out for {@code cooldown}.
+     *
+     * <p>Ported from {@code Bot.block}. Does nothing unless {@link #setShield(boolean)} put a
+     * shield in the offhand, and nothing while a previous block is still on cooldown.
+     *
+     * <p>In v1 this has no caller: its only upstream caller is the neural-network branch of
+     * {@code tickBot} (plan correction 4). It is ported anyway because {@code hurtServer}
+     * consults {@code blocking}, and a shield that can never be raised would make that branch
+     * untestable.
+     */
+    public void block(int blockLength, int cooldown) {
+        if (!shield || blockUse) {
+            return;
+        }
+
+        startBlocking();
+
+        if (registry != null) {
+            registry.scheduler().runLater(blockLength, () -> stopBlocking(cooldown));
+        }
+    }
+
+    private void startBlocking() {
+        this.blocking = true;
+        this.blockUse = true;
+
+        startUsingItem(InteractionHand.OFF_HAND);
+        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), getEntityData().packDirty()));
+    }
+
+    private void stopBlocking(int cooldown) {
+        this.blocking = false;
+
+        stopUsingItem();
+
+        if (registry != null) {
+            registry.scheduler().runLater(cooldown, () -> this.blockUse = false);
+        }
+
+        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), getEntityData().packDirty()));
+    }
+
+    /**
+     * Whether the bot is blocking.
+     *
+     * <p>Upstream delegated to vanilla {@code isBlocking()} rather than reading its own
+     * {@code blocking} flag, and the two can disagree: vanilla also requires the item to have
+     * been in use past its warmup. Delegating is what the Paper build did, so it is what this
+     * does; the private flag stays because the damage path reads it directly, the same way
+     * upstream's {@code hurt} did.
+     */
+    public boolean isBotBlocking() {
+        return isBlocking();
+    }
+
+    /** Read by the damage path, which must see the flag rather than vanilla's view. */
+    boolean isBlockingFlag() {
+        return blocking;
+    }
+
+    // ---- state ------------------------------------------------------------
+
+    public MotionVec getOffset() {
+        return offset;
+    }
+
+    public boolean isFalling() {
+        return getBotVelocity().getY() < -0.8;
+    }
+
+    /** True every {@code i}th tick of the bot's life. {@code aliveTicks} starts at 0. */
+    public boolean tickDelay(int i) {
+        return getAliveTicks() % i == 0;
+    }
+
+    public boolean isBotAlive() {
+        return isAlive();
+    }
+
+    public boolean isBotOnFire() {
+        return isOnFire();
+    }
+
+    public String getBotName() {
+        return getGameProfile().name();
+    }
+
+    /**
+     * True in the Nether.
+     *
+     * <p>Upstream's {@code getDimension()} returned Bukkit's {@code World.Environment} and
+     * every one of its five call sites compared it to {@code NETHER}, so the predicate is the
+     * faithful translation of the accessor.
+     */
+    public boolean isNether() {
+        return level().dimension() == Level.NETHER;
+    }
+
+    public UUID getTargetPlayer() {
+        return targetPlayer;
+    }
+
+    public void setTargetPlayer(UUID target) {
+        this.targetPlayer = target;
+    }
+
+    public int getKills() {
+        return kills;
+    }
+
+    public void incrementKills() {
+        kills++;
     }
 
     void incrementAliveTicks() {
