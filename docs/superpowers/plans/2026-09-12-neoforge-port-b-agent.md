@@ -297,6 +297,30 @@ Consult this instead of re-deriving the mapping in every task.
 | `runTaskTimer(plugin, 0, n)` | `TickScheduler.runRepeating(n, action)` — added in Task 17 |
 | `ItemStack` (Bukkit) | `net.minecraft.world.item.ItemStack`; empty is `ItemStack.EMPTY`, never `null` |
 
+## GameTest conventions
+
+Two things that silently produce a green run if you get them wrong. Both were found executing
+Task 2, and every GameTest in this plan is written assuming them.
+
+**Every test method needs `@TestHolder("<id>")`, not just `@GameTest`.** The NeoForge test
+framework collects tests by their holder id; a `@GameTest` method without one is never registered,
+and the run still prints `All N required tests passed` with the old N. Plan A's suite is 16
+`@GameTest` and 16 `@TestHolder`, exactly 1:1. After adding tests, check the count moved:
+
+```bash
+./gradlew runGameTestServer 2>&1 | grep -E "Found [0-9]+ tests|required tests"
+```
+
+The id convention in this plan is the method name verbatim, so the two read the same.
+
+**`assertValueEqual` is `equals` on a boxed value, not numeric comparison.** For floats that means
+bit-pattern equality: `-0.0f` does not equal `0.0f`, and `NaN` does not equal itself. A flat
+direction gives `BotMath.fetchPitch` a pitch of `-0.0`, which is correct and which
+`assertValueEqual(pitch, 0f, …)` rejects. Use primitive `==` inside `assertTrue` for any float that
+can legitimately be signed zero, and an epsilon for anything computed through trigonometry.
+
+---
+
 Two hazards worth repeating from Plan A, because both are live again here:
 
 - **`MotionVec` mutates in place; `Vec3` does not.** Every `MotionVec` mutator returns `this`, so
