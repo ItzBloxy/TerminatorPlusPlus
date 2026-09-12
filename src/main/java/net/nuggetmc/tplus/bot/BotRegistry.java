@@ -67,19 +67,35 @@ public final class BotRegistry {
 
             try {
                 tickBot(bot);
-                failures.remove(bot);
             } catch (Throwable t) {
-                int count = failures.merge(bot, 1, Integer::sum);
-                TerminatorPlus.LOGGER.error("Bot '{}' failed its tick ({}/{})",
-                        bot.getGameProfile().name(), count, MAX_CONSECUTIVE_FAILURES, t);
-
-                if (count >= MAX_CONSECUTIVE_FAILURES) {
-                    TerminatorPlus.LOGGER.error("Evicting bot '{}' after {} consecutive failures",
-                            bot.getGameProfile().name(), count);
-                    safeRemove(bot);
-                }
+                noteTickFailure(bot, t);
             }
         }
+    }
+
+    /**
+     * Records a failed tick and evicts the bot once it has failed
+     * {@value #MAX_CONSECUTIVE_FAILURES} times in a row.
+     *
+     * <p>Called from two places: {@link #tick()} for the agent hook, and
+     * {@code Bot.tick()} for the entity tick. The entity tick is the one that can crash
+     * the server, so it must route here too.
+     */
+    public void noteTickFailure(Bot bot, Throwable t) {
+        int count = failures.merge(bot, 1, Integer::sum);
+        TerminatorPlus.LOGGER.error("Bot '{}' failed its tick ({}/{})",
+                bot.getGameProfile().name(), count, MAX_CONSECUTIVE_FAILURES, t);
+
+        if (count >= MAX_CONSECUTIVE_FAILURES) {
+            TerminatorPlus.LOGGER.error("Evicting bot '{}' after {} consecutive failures",
+                    bot.getGameProfile().name(), count);
+            safeRemove(bot);
+        }
+    }
+
+    /** Clears the consecutive-failure counter after a healthy tick. */
+    public void clearTickFailures(Bot bot) {
+        failures.remove(bot);
     }
 
     /**

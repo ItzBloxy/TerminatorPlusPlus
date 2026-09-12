@@ -7,6 +7,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +56,16 @@ public final class GroundCheck {
                     continue;
                 }
 
-                AABB blockBox = state.getCollisionShape(level, pos).bounds().move(pos);
+                // VoxelShape.bounds() throws UnsupportedOperationException on an empty
+                // shape, which every non-collidable block has (grass, flowers, water).
+                // Bukkit's getBoundingBox() returned an empty box instead of throwing,
+                // so skipping these matches the original behaviour.
+                VoxelShape shape = state.getCollisionShape(level, pos);
+                if (shape.isEmpty()) {
+                    continue;
+                }
+
+                AABB blockBox = shape.bounds().move(pos);
                 if (botBox.intersects(blockBox)) {
                     found.add(pos);
                 }
@@ -78,7 +88,12 @@ public final class GroundCheck {
                     continue;
                 }
 
-                AABB shape = state.getCollisionShape(level, pos).bounds().move(pos);
+                VoxelShape voxel = state.getCollisionShape(level, pos);
+                if (voxel.isEmpty()) {
+                    continue;
+                }
+
+                AABB shape = voxel.bounds().move(pos);
                 AABB tall = new AABB(shape.minX, shape.minY, shape.minZ,
                         shape.maxX, shape.minY + FENCE_EXTRA_HEIGHT, shape.maxZ);
 

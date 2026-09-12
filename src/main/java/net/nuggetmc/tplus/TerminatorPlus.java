@@ -5,9 +5,11 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.command.BotCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +40,10 @@ public class TerminatorPlus {
         REGISTRY.tick();
     }
 
-    // The RegisterCommandsEvent handler is added in Task 10, once BotCommands exists.
+    @SubscribeEvent
+    public void onRegisterCommands(RegisterCommandsEvent event) {
+        BotCommands.register(event.getDispatcher());
+    }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {

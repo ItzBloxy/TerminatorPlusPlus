@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.nuggetmc.tplus.TerminatorPlus;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.BotPhysics;
@@ -191,8 +192,23 @@ public class Bot extends ServerPlayer {
     private List<BlockPos> standingOn = List.of();
     private boolean removeOnDeath = true;
 
+    /**
+     * The level drives this every tick. It is wrapped because a throw here propagates
+     * straight into {@code ServerLevel.tickNonPassenger} and crashes the server — which
+     * is exactly what an empty-VoxelShape bug did before this guard existed.
+     * BotRegistry's isolation covers only the agent hook, not this path.
+     */
     @Override
     public void tick() {
+        try {
+            tickInternal();
+            TerminatorPlus.registry().clearTickFailures(this);
+        } catch (Throwable t) {
+            TerminatorPlus.registry().noteTickFailure(this, t);
+        }
+    }
+
+    private void tickInternal() {
         loadChunks();
 
         super.tick();
@@ -316,8 +332,19 @@ public class Bot extends ServerPlayer {
                     continue;
                 }
 
-                AABB blockBox = state.getCollisionShape(level(), pos).bounds().move(pos);
-                if (botBox.intersects(blockBox) || block == Blocks.WATER || block == Blocks.LAVA) {
+                // Water, lava, cobweb and vines all have empty collision shapes, and
+                // VoxelShape.bounds() throws on those. The block-identity check below
+                // is what actually matters for them; the intersect test only applies to
+                // NO_FALL blocks that do collide.
+                VoxelShape voxel = state.getCollisionShape(level(), pos);
+                if (block == Blocks.WATER || block == Blocks.LAVA) {
+                    return true;
+                }
+                if (voxel.isEmpty()) {
+                    continue;
+                }
+
+                if (botBox.intersects(voxel.bounds().move(pos))) {
                     return true;
                 }
             }
