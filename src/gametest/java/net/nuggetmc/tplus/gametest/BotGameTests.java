@@ -319,6 +319,81 @@ public final class BotGameTests {
         helper.succeed();
     }
 
+    // ---- death -------------------------------------------------------------
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("bot_death_removes_after_delay")
+    static void deathUnregistersImmediatelyAndDiscardsAfterTwentyTicks(ExtendedGameTestHelper helper) {
+        // die() was rewritten during plan review because the first version only sent
+        // despawn packets, leaking a dead entity per death. Nothing exercised it until
+        // now. Upstream's dieCheck unregisters and hides at once, then discards the entity
+        // 20 ticks later so the death animation can play.
+        //
+        // The delayed half runs on the owning registry's scheduler, so this test has to
+        // tick that registry - a registry nobody ticks would never fire it.
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(2, 2, 2), "DyingBot");
+        makeSurvival(bot);
+
+        // A fresh ServerPlayer carries invulnerableTime = 60, decremented in
+        // ServerPlayer.tick(), so a lethal hit before this is simply ignored.
+        tickBot(bot, 70);
+
+        int id = bot.getId();
+        helper.assertValueEqual(registry.size(), 1, "registry size after spawn");
+
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().genericKill(), 1000f);
+
+        helper.assertFalse(bot.isAlive(), "bot should be dead after a lethal hit");
+        helper.assertValueEqual(registry.size(), 0, "die() should unregister the bot at once");
+        helper.assertTrue(helper.getLevel().getEntity(id) == bot,
+                "the entity should still be present during the 20-tick death delay");
+
+        for (int i = 0; i < 19; i++) {
+            registry.scheduler().tick();
+        }
+        helper.assertTrue(helper.getLevel().getEntity(id) == bot,
+                "the entity must survive until the delay elapses");
+
+        registry.scheduler().tick();
+
+        helper.assertTrue(bot.isRemoved(), "bot should be removed once the delay elapses");
+        helper.assertTrue(helper.getLevel().getEntity(id) == null,
+                "the entity must be gone from the level after the delayed removeBot");
+
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("bot_death_respects_remove_on_death")
+    static void deathLeavesTheBotAloneWhenRemoveOnDeathIsOff(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(2, 2, 2), "StayingBot");
+        makeSurvival(bot);
+        bot.setRemoveOnDeath(false);
+
+        // Burn off spawn invulnerability (see the sibling test).
+        tickBot(bot, 70);
+
+        int id = bot.getId();
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().genericKill(), 1000f);
+
+        helper.assertFalse(bot.isAlive(), "bot should still die");
+        helper.assertValueEqual(registry.size(), 1, "removeOnDeath=false must keep it registered");
+
+        for (int i = 0; i < 40; i++) {
+            registry.scheduler().tick();
+        }
+
+        helper.assertTrue(helper.getLevel().getEntity(id) == bot,
+                "removeOnDeath=false must leave the entity in the world");
+
+        bot.removeBot();
+        helper.succeed();
+    }
+
     // ---- identity and cleanup ---------------------------------------------
 
     @GameTest

@@ -111,9 +111,13 @@ The load-bearing mechanism survives intact:
   `FakePlayer extends ServerPlayer` uses the identical constructor-plus-fake-connection pattern.
   However it calls `setInvulnerable(true)` and no-ops `tick()`, `die()`, and `canHarmPlayer()` —
   each of which a PvP bot requires. `Bot` extends `ServerPlayer` directly.
-- **Worth taking from it:** `FakePlayerAdvancements`, which fixes a real memory leak
-  ([NeoForge #1487](https://github.com/neoforged/NeoForge/issues/1487)) affecting any fake player
-  whose UUID is not a real account. TerminatorPlus generates random UUIDs and is exposed today.
+- **The #1487 leak needs a fix, but not that class.** NeoForge ships `FakePlayerAdvancements`
+  for the memory leak ([NeoForge #1487](https://github.com/neoforged/NeoForge/issues/1487)) that
+  affects any fake player whose UUID is not a real account — and TerminatorPlus generates random
+  UUIDs, so it is exposed. **Correction (found during Plan A):** that class is referenced nowhere
+  in NeoForge and `ServerPlayer.advancements` is private and final, so installing a replacement
+  would need an access transformer. `PlayerAdvancements.clearTriggers()` is public, so the fix is
+  to call it in `removeBot`. No `BotAdvancements` class is needed.
 - **`FakeConnection` has a two-statement body** — `super(PacketFlow.SERVERBOUND)` in the constructor
   plus a no-op `setListenerForServerboundHandshake`. Together with unobfuscated field names this
   collapses `MockConnection` (68 lines) and `MockChannel` (81 lines) to roughly 15.
@@ -183,7 +187,7 @@ terminator-plus/
     ├── main/java/net/nuggetmc/tplus/
     │   ├── TerminatorPlus.java          @Mod entry point
     │   ├── bot/                         Bot, BotConnection, BotFactory, BotRegistry,
-    │   │                                BotGameProfiles, BotAdvancements
+    │   │                                BotGameProfiles
     │   ├── motion/                      MotionVec, BotPhysics, GroundCheck, BotMath
     │   ├── agent/                       Agent, AgentState
     │   │   └── legacy/                  LegacyAgent, SurroundingScan, Navigation,
@@ -247,7 +251,6 @@ ServerTickEvent.Post
 | `Bot extends ServerPlayer` | The bot entity | Overrides `hurtServer`, `die`, `tick`, `doTick`, `push`, and `isFakePlayer` (returns `false`). ~450 lines, down from 903. |
 | `BotConnection extends Connection` | Fake network peer | ~15 lines. `super(PacketFlow.SERVERBOUND)`, no-op `setListenerForServerboundHandshake`, no-op `send` overloads, `isConnected()` returns `true`. Replaces `MockConnection` and `MockChannel`. |
 | `BotGameProfiles` | Profile and skin construction | Static factory returning `GameProfile`. Required because `GameProfile` is now a final record. |
-| `BotAdvancements` | Advancement no-op | Ported from NeoForge's `FakePlayerAdvancements`; prevents the #1487 leak. |
 | `BotFactory` | Spawn and visibility | Sends player-info, add-entity, entity-data (via `getNonDefaultValues()`), and head-rotation packets. |
 | `BotRegistry` | Live bot set and tick driver | Replaces `BotManagerImpl`. Concurrent-safe set, as today. |
 
@@ -333,7 +336,7 @@ plan is written directly from this table.
 | `utils/NMSUtils.java` | 45 | **Deleted** — replaced by `entityData.getNonDefaultValues()` |
 | `bridge/InternalBridgeImpl.java` | 18 | Folded into `bot/BotFactory` — no bridge layer needed |
 | `utils/MCLogs.java` | 64 | `util/BotLog` — retarget to the mod's SLF4J logger |
-| — | — | **New:** `bot/BotFactory`, `bot/BotGameProfiles`, `bot/BotAdvancements`, `util/TickScheduler`, `motion/MotionVec` |
+| — | — | **New:** `bot/BotFactory`, `bot/BotGameProfiles`, `util/TickScheduler`, `motion/MotionVec` |
 
 **Agent** (from `TerminatorPlus-API`)
 

@@ -80,10 +80,7 @@ public final class BotCommands {
             double f = count < 100 ? 0.004 * count : 0.4;
 
             for (int i = 1; i <= count; i++) {
-                // Upstream substitutes '%' with the 1-based index rather than appending
-                // it, so "Bot%" gives Bot1..BotN and a name without '%' gives N bots
-                // that share a name. Preserved deliberately.
-                String botName = name.replace("%", String.valueOf(i));
+                String botName = BotGameProfiles.indexedName(name, i);
                 GameProfile profile = BotGameProfiles.create(botName, skin);
 
                 Bot bot = BotFactory.spawn(TerminatorPlus.registry(), level, pos,

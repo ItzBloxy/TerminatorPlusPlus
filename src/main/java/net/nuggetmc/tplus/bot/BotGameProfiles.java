@@ -66,6 +66,17 @@ public final class BotGameProfiles {
         return uuid;
     }
 
+    /**
+     * Substitutes upstream's {@code %} index placeholder.
+     *
+     * <p>{@code BotManagerImpl.createBots} did {@code name.replace("%", i)} with {@code i}
+     * starting at 1, so "Bot%" yields Bot1..BotN and a name without {@code %} yields N
+     * bots that share a name. Extracted so the rule is testable without a world.
+     */
+    public static String indexedName(String template, int index) {
+        return template.replace("%", String.valueOf(index));
+    }
+
     /** Minecraft rejects names longer than 16 characters. */
     public static String trim16(String name) {
         return name.length() > 16 ? name.substring(0, 16) : name;

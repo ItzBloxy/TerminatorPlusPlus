@@ -12,6 +12,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Looks up a player's skin texture from Mojang's session API.
@@ -25,6 +27,17 @@ public final class MojangSkins {
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
+
+    /**
+     * A dedicated single-thread executor rather than the common ForkJoinPool: these tasks
+     * block on HTTP for up to ten seconds each, and the common pool is sized for CPU work
+     * and shared with the rest of the JVM. Daemon so it never holds shutdown open.
+     */
+    private static final Executor LOOKUP_EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "TerminatorPlus skin lookup");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private static final String UUID_URL = "https://api.mojang.com/users/profiles/minecraft/";
     private static final String SESSION_URL =
@@ -55,7 +68,7 @@ public final class MojangSkins {
                 TerminatorPlus.LOGGER.warn("Could not fetch skin for '{}': {}", name, e.toString());
                 return null;
             }
-        });
+        }, LOOKUP_EXECUTOR);
     }
 
     private static JsonObject readJson(String url) throws Exception {

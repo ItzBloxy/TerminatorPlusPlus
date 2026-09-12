@@ -99,6 +99,27 @@ class BotGameProfilesTest {
     }
 
     @Test
+    void indexedNameSubstitutesThePlaceholderOneBased() {
+        // Upstream's BotManagerImpl.createBots did name.replace("%", i) with i starting at
+        // 1. The first port of this appended a 0-based index instead, which the Tasks 1-10
+        // audit caught; this pins the corrected rule.
+        assertEquals("Bot1", BotGameProfiles.indexedName("Bot%", 1));
+        assertEquals("Bot4", BotGameProfiles.indexedName("Bot%", 4));
+    }
+
+    @Test
+    void indexedNameLeavesANameWithoutThePlaceholderAlone() {
+        // Upstream behaviour: N bots with no '%' all share one name.
+        assertEquals("Alice", BotGameProfiles.indexedName("Alice", 1));
+        assertEquals("Alice", BotGameProfiles.indexedName("Alice", 7));
+    }
+
+    @Test
+    void indexedNameSubstitutesEveryOccurrence() {
+        assertEquals("2a2", BotGameProfiles.indexedName("%a%", 2));
+    }
+
+    @Test
     void anExplicitUuidIsUsedVerbatim() {
         UUID fixed = UUID.fromString("00000000-0000-0000-0000-000000000001");
         GameProfile profile = BotGameProfiles.create(fixed, "Fixed", null);

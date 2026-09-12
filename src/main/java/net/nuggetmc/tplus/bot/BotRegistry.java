@@ -131,12 +131,18 @@ public final class BotRegistry {
         scheduler.cancelAll();
     }
 
-    /** Runs {@code action} on the server thread, whether or not the caller is on it. */
+    /**
+     * Runs {@code action} on the server thread, whether or not the caller is on it.
+     *
+     * <p>Uses {@code executeIfPossible} rather than {@code execute}: an async skin lookup
+     * can complete after the server has begun shutting down, and that variant drops the
+     * task instead of failing.
+     */
     public static void onServerThread(MinecraftServer server, Runnable action) {
         if (server.isSameThread()) {
             action.run();
         } else {
-            server.execute(action);
+            server.executeIfPossible(action);
         }
     }
 }
