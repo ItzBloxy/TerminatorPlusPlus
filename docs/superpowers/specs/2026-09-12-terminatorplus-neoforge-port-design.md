@@ -32,10 +32,12 @@ game internals. **Both are now true on Paper too**: Mojang stopped obfuscating t
 
 What NeoForge still offers this project specifically:
 
-- **A real test harness.** GameTests plus `EphemeralTestServerProvider` (a headless
-  `MinecraftServer` injected into JUnit) give automated in-world verification. Bukkit has no
-  equivalent. For a faithful translation of 1,600 lines of movement AI, this is the difference
-  between provable and hopeful.
+- **A real test harness.** NeoForge's `testframework` provides annotation-driven GameTests with
+  synthesised templates, giving automated in-world verification; `EphemeralTestServerProvider`
+  additionally injects a headless `MinecraftServer` into JUnit for registry- and datapack-backed
+  tests (but **not** for anything needing a world — see the correction in section 6). Bukkit has no
+  equivalent to either. For a faithful translation of 1,600 lines of movement AI, this is the
+  difference between provable and hopeful.
 - **Mixins and Access Transformers** for anything the vanilla API does not expose.
 - **No plugin-API churn.** Paper 26.2 alone removed Adventure 4 APIs and changed the entity class
   hierarchy; the mod path only tracks vanilla.
@@ -452,6 +454,29 @@ the tag-loading reason above.
 
 **GameTests.** Headless in CI via the `gameTestServer` run config. In-world behavior: a bot falls and
 takes damage; jumps a one-block step; acquires and attacks a target; despawns cleanly.
+
+> **Correction (2026-09-12, found executing Plan A).** Two claims above are wrong.
+>
+> 1. **The annotation-based GameTest tier does exist**, just not where this spec looked.
+>    Minecraft 26.2 removed vanilla's `@GameTest`/`@GameTestHolder` in favour of a
+>    datapack-driven `GameTestInstance` registry — but NeoForge's `testframework`
+>    artifact ships its own `@GameTest` plus `@EmptyTemplate` (no `.nbt` files needed),
+>    `ExtendedGameTestHelper`, and `GameTestPlayer`. Registration goes through a
+>    `TestFramework` the mod builds with `FrameworkConfiguration.builder(...).create()`,
+>    with `@ForEachTest`/`@TestHolder` holder classes, and `testframework` has to leave
+>    `testImplementation` because GameTests run in-game.
+>
+> 2. **The server-backed JUnit tier cannot host in-world tests at all.**
+>    `EphemeralTestServerProvider` builds a frozen, empty `LevelStem` registry — its
+>    source comment reads "The server doesn't have any levels" and its javadoc says not
+>    to touch the world and to use a GameTest if you need one. It is good for registry,
+>    datapack and tag data, and for pure logic that needs those; it cannot construct an
+>    entity, because that needs a `ServerLevel`.
+>
+> Consequence: anything involving a live bot — spawning, physics, `GroundCheck`,
+> `BlockRules` — belongs in GameTests, not the server-backed tier. Plan A's `BotSpawnTest`
+> is written and kept compiling but `@Disabled` pending that harness; the same ground is
+> covered manually over RCON for now.
 
 **Manual smoke testing.** Combat feel. No automated test captures whether a bot fights *well*, and
 that is the project's whole point.

@@ -29,8 +29,13 @@ public final class BotGameProfiles {
 
     /**
      * authlib 9.x changed both types here: PropertyMap is a ForwardingMultimap with no
-     * no-arg constructor, so it must wrap a backing multimap, and Property is a record.
-     * The backing map is mutable because vanilla may add properties to a profile later.
+     * no-arg constructor, so it must be handed a backing multimap, and Property is a
+     * record.
+     *
+     * <p>The backing multimap is only a builder. {@code PropertyMap}'s constructor runs
+     * {@code ImmutableMultimap.copyOf} on it, so the resulting profile's properties are
+     * immutable no matter what is passed in — consistent with GameProfile being a record.
+     * Any property a bot needs has to be set here, at construction.
      */
     public static GameProfile create(UUID uuid, String name, String[] skin) {
         Multimap<String, Property> backing = LinkedHashMultimap.create();
