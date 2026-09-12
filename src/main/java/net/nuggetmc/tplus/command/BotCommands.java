@@ -3,15 +3,21 @@ package net.nuggetmc.tplus.command;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.nuggetmc.tplus.TerminatorPlus;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
@@ -20,6 +26,7 @@ import net.nuggetmc.tplus.bot.BotRegistry;
 import net.nuggetmc.tplus.util.MojangSkins;
 
 import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 /**
  * The {@code /tplus} command tree.
@@ -43,7 +50,9 @@ public final class BotCommands {
     // rules reject '%', and '%' is upstream's index placeholder ("Bot%" -> Bot1..BotN).
     // string() still accepts a bare word, so /tplus create Alice 3 works unquoted while
     // /tplus create "Bot%" 4 works quoted.
-    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+    public static void register(RegisterCommandsEvent event) {
+        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("tplus")
                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
 
@@ -61,6 +70,28 @@ public final class BotCommands {
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
         root.then(Commands.literal("list").executes(BotCommands::list));
+
+        // Drives the action API by hand. This is how phase 1 is verified outside a GameTest:
+        // stand in front of a bot and make it do things.
+        root.then(Commands.literal("bot")
+                .then(Commands.argument("name", StringArgumentType.string())
+                        .then(Commands.literal("punch").executes(ctx -> act(ctx, Bot::punch)))
+                        .then(Commands.literal("sneak").executes(ctx -> act(ctx, Bot::sneak)))
+                        .then(Commands.literal("stand").executes(ctx -> act(ctx, Bot::stand)))
+                        .then(Commands.literal("swim").executes(ctx -> act(ctx, Bot::swim)))
+                        .then(Commands.literal("lookdown")
+                                .executes(ctx -> act(ctx, bot -> bot.look(Direction.DOWN))))
+                        .then(Commands.literal("lookup")
+                                .executes(ctx -> act(ctx, bot -> bot.look(Direction.UP))))
+                        .then(Commands.literal("faceme")
+                                .executes(ctx -> act(ctx, bot -> bot.faceLocation(ctx.getSource().getPosition()))))
+                        .then(Commands.literal("shield")
+                                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                                        .executes(ctx -> act(ctx, bot ->
+                                                bot.setShield(BoolArgumentType.getBool(ctx, "enabled"))))))
+                        .then(Commands.literal("hold")
+                                .then(Commands.argument("item", ItemArgument.item(event.getBuildContext()))
+                                        .executes(BotCommands::hold)))));
 
         dispatcher.register(root);
     }
@@ -101,6 +132,31 @@ public final class BotCommands {
         }));
 
         return count;
+    }
+
+    /** Looks up a bot by name and applies {@code action} to it. */
+    private static int act(CommandContext<CommandSourceStack> ctx, Consumer<Bot> action) {
+        String name = StringArgumentType.getString(ctx, "name");
+        Bot bot = TerminatorPlus.registry().byName(name);
+
+        if (bot == null) {
+            ctx.getSource().sendFailure(Component.literal("No bot named '" + name + "'"));
+            return 0;
+        }
+
+        action.accept(bot);
+        return 1;
+    }
+
+    /**
+     * Separate from {@link #act} because {@code createItemStack} throws a checked
+     * {@code CommandSyntaxException}, which a {@code Consumer} cannot declare.
+     */
+    private static int hold(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        // 26.2 dropped the second parameter: createItemStack(int), not (int, boolean).
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(1);
+
+        return act(ctx, bot -> bot.setItem(stack));
     }
 
     private static int removeOne(CommandContext<CommandSourceStack> ctx) {

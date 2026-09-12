@@ -13,6 +13,8 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.InteractionHand;
@@ -534,6 +536,37 @@ public class Bot extends ServerPlayer {
 
     public void incrementKills() {
         kills++;
+    }
+
+    /**
+     * Places {@code type} at {@code pos} if nothing solid is there, with the animation of a
+     * player doing it.
+     *
+     * <p>Ported from {@code Bot.attemptBlockPlace}. Two details are upstream's and look wrong
+     * but are not: the bot always puts <b>cobblestone</b> in hand regardless of {@code type},
+     * and the sound is always the stone place sound.
+     *
+     * <p>The solidity guard is upstream's {@code LegacyMats.isSolid}. Until Task 13 builds
+     * {@code BlockRules}, this uses the vanilla predicate, which is the same thing for every
+     * block upstream's version did not special-case. Task 13 replaces this line.
+     */
+    public void attemptBlockPlace(BlockPos pos, Block type, boolean down) {
+        if (down) {
+            look(Direction.DOWN);
+        } else {
+            faceLocation(Vec3.atCenterOf(pos));
+        }
+
+        setItem(new ItemStack(Items.COBBLESTONE));
+        punch();
+
+        ServerLevel level = (ServerLevel) level();
+        BlockState state = level.getBlockState(pos);
+
+        if (!state.isSolid()) {
+            level.setBlockAndUpdate(pos, type.defaultBlockState());
+            level.playSound(null, pos, SoundEvents.STONE_PLACE, SoundSource.BLOCKS, 1f, 1f);
+        }
     }
 
     void incrementAliveTicks() {

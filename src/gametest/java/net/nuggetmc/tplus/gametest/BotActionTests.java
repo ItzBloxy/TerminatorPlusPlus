@@ -5,6 +5,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
 import net.neoforged.testframework.annotation.TestHolder;
@@ -358,6 +359,81 @@ public final class BotActionTests {
         helper.assertTrue(offset.length() <= 3.0 + 1.0E-9,
                 "offset must lie within radius 3, got " + offset.length());
         helper.assertTrue(offset.getY() == 0.0, "the offset is horizontal, got " + offset.getY());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    // ---- block placing ------------------------------------------------------
+
+    @GameTest
+    @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("attempt_block_place_fills_an_empty_space")
+    static void attempt_block_place_fills_an_empty_space(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        BlockPos target = helper.absolutePos(new BlockPos(3, 1, 1));
+        bot.attemptBlockPlace(target, Blocks.COBBLESTONE, false);
+
+        helper.assertBlockPresent(Blocks.COBBLESTONE, new BlockPos(3, 1, 1));
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("attempt_block_place_refuses_to_overwrite_a_solid_block")
+    static void attempt_block_place_refuses_to_overwrite_a_solid_block(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        BlockPos relative = new BlockPos(3, 1, 1);
+        helper.setBlock(relative, Blocks.OBSIDIAN);
+
+        bot.attemptBlockPlace(helper.absolutePos(relative), Blocks.COBBLESTONE, false);
+
+        // Upstream guarded on LegacyMats.isSolid. Without the guard a bot towering out of
+        // lava would happily replace the bedrock it is standing on.
+        helper.assertBlockPresent(Blocks.OBSIDIAN, relative);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("attempt_block_place_down_looks_down_rather_than_at_the_block")
+    static void attempt_block_place_down_looks_down_rather_than_at_the_block(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        bot.setYRot(42f);
+
+        bot.attemptBlockPlace(helper.absolutePos(new BlockPos(3, 1, 1)), Blocks.COBBLESTONE, true);
+
+        // down = true means look(DOWN), which keeps yaw. down = false means faceLocation,
+        // which does not. The agent picks between them per situation.
+        helper.assertValueEqual(bot.getXRot(), 90f, "pitch when placing downward");
+        helper.assertValueEqual(bot.getYRot(), 42f, "yaw must survive a downward place");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("attempt_block_place_holds_cobblestone")
+    static void attempt_block_place_holds_cobblestone(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        // Upstream always put COBBLESTONE in hand, even when placing something else — the
+        // `type` parameter and the held item are independent, and only one call site ever
+        // passes a different type. Ported as-is.
+        bot.attemptBlockPlace(helper.absolutePos(new BlockPos(3, 1, 1)), Blocks.COBBLESTONE, false);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.COBBLESTONE), "held item after placing");
 
         registry.reset();
         helper.succeed();

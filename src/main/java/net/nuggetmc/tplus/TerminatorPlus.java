@@ -42,7 +42,7 @@ public class TerminatorPlus {
 
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
-        BotCommands.register(event.getDispatcher());
+        BotCommands.register(event);
     }
 
     @SubscribeEvent
