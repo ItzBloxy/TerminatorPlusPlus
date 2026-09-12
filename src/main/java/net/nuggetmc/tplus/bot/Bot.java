@@ -2,12 +2,14 @@ package net.nuggetmc.tplus.bot;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
+import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
@@ -180,6 +182,70 @@ public class Bot extends ServerPlayer {
         }
 
         remove(RemovalReason.DISCARDED);
+    }
+
+    // ---- rotation and looking ---------------------------------------------
+
+    /** Pass-through. {@code Entity.getBoundingBox()} is public final, so this cannot override. */
+    public AABB getBotBoundingBox() {
+        return getBoundingBox();
+    }
+
+    public void setBotPitch(float pitch) {
+        setXRot(pitch);
+    }
+
+    /**
+     * Turns the bot to face {@code target}.
+     *
+     * <p>Ported from {@code Bot.faceLocation}. Upstream passed {@code keepYaw = false}, so
+     * both yaw and pitch are recomputed and the head-rotation packet goes out.
+     */
+    public void faceLocation(Vec3 target) {
+        look(MotionVec.of(target.subtract(position())), false);
+    }
+
+    /**
+     * Turns the bot to face a block face.
+     *
+     * <p>Ported from {@code Bot.look(BlockFace)}. UP and DOWN keep the current yaw — a bot
+     * looking at the block under its feet must not spin to face north to do it.
+     *
+     * <p>26.2 renamed the unit vector: {@code Direction.getUnitVec3()} replaces 1.21's
+     * {@code step()}.
+     */
+    public void look(Direction face) {
+        look(MotionVec.of(face.getUnitVec3()), face == Direction.DOWN || face == Direction.UP);
+    }
+
+    private void look(MotionVec dir, boolean keepYaw) {
+        // Not upstream's: upstream could not reach this state because Bukkit's Vector threw
+        // on a zero normalize and the exception unwound. MotionVec reproduces the NaN
+        // faithfully instead (see spec §2.5), which means a zero direction would write NaN
+        // into yRot and the bot would never aim again. Refuse it here, at the one place
+        // every caller funnels through.
+        if (dir.lengthSquared() == 0 || BotMath.isNotFinite(dir)) {
+            return;
+        }
+
+        float yaw;
+        float pitch;
+
+        if (keepYaw) {
+            yaw = getYRot();
+            pitch = BotMath.fetchPitch(dir);
+        } else {
+            float[] vals = BotMath.fetchYawPitch(dir);
+            yaw = vals[0];
+            pitch = vals[1];
+
+            setYHeadRot(yaw);
+            BotFactory.broadcast(this, new ClientboundRotateHeadPacket(this, (byte) (yaw * 256 / 360f)));
+        }
+
+        // Entity.setRot is protected in 26.2 — reachable here because Bot is a subclass, but
+        // not from Navigation. That is why turning is a Bot method and not a helper.
+        setRot(yaw, pitch);
     }
 
     void incrementAliveTicks() {
