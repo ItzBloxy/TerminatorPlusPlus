@@ -39,12 +39,16 @@ public final class BotCommands {
     private BotCommands() {
     }
 
+    // Names use StringArgumentType.string(), not word(): Brigadier's unquoted-string
+    // rules reject '%', and '%' is upstream's index placeholder ("Bot%" -> Bot1..BotN).
+    // string() still accepts a bare word, so /tplus create Alice 3 works unquoted while
+    // /tplus create "Bot%" 4 works quoted.
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("tplus")
                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
 
         root.then(Commands.literal("create")
-                .then(Commands.argument("name", StringArgumentType.word())
+                .then(Commands.argument("name", StringArgumentType.string())
                         .executes(ctx -> create(ctx, 1, false))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
                                 .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false))
@@ -52,7 +56,7 @@ public final class BotCommands {
                                         .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), true))))));
 
         root.then(Commands.literal("remove")
-                .then(Commands.argument("name", StringArgumentType.word())
+                .then(Commands.argument("name", StringArgumentType.string())
                         .executes(BotCommands::removeOne)));
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
@@ -71,13 +75,28 @@ public final class BotCommands {
         source.sendSuccess(() -> Component.literal("Fetching skin for " + name + "..."), false);
 
         MojangSkins.fetch(name).thenAccept(skin -> BotRegistry.onServerThread(server, () -> {
-            for (int i = 0; i < count; i++) {
-                String botName = count == 1 ? name : name + i;
+            // Scatter factor, from BotManagerImpl.createBots: bots after the first get a
+            // nudge so a batch spawned on one spot does not stack up.
+            double f = count < 100 ? 0.004 * count : 0.4;
+
+            for (int i = 1; i <= count; i++) {
+                // Upstream substitutes '%' with the 1-based index rather than appending
+                // it, so "Bot%" gives Bot1..BotN and a name without '%' gives N bots
+                // that share a name. Preserved deliberately.
+                String botName = name.replace("%", String.valueOf(i));
                 GameProfile profile = BotGameProfiles.create(botName, skin);
 
-                Bot bot = BotFactory.spawn(level, pos, source.getRotation().y, source.getRotation().x,
-                        profile, playerList);
-                TerminatorPlus.registry().add(bot);
+                Bot bot = BotFactory.spawn(TerminatorPlus.registry(), level, pos,
+                        source.getRotation().y, source.getRotation().x, profile, playerList);
+
+                if (i > 1) {
+                    bot.getBotVelocity()
+                            .setX(Math.random() - 0.5)
+                            .setY(0.5)
+                            .setZ(Math.random() - 0.5)
+                            .normalize()
+                            .multiply(f);
+                }
             }
 
             source.sendSuccess(() -> Component.literal(

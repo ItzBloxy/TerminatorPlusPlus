@@ -21,6 +21,11 @@ public final class BotRegistry {
 
     private static final int MAX_CONSECUTIVE_FAILURES = 3;
 
+    /**
+     * Bot is used as a set element and map key. {@code Entity} overrides equals/hashCode
+     * in terms of {@code getId()}, not identity — safe here because entity ids come from
+     * a monotonic counter, are never reused, and never change while an entity lives.
+     */
     private final Set<Bot> bots = ConcurrentHashMap.newKeySet();
     private final Map<Bot, Integer> failures = new HashMap<>();
     private final TickScheduler scheduler = new TickScheduler();
@@ -37,7 +42,9 @@ public final class BotRegistry {
         return bots.size();
     }
 
+    /** Registers the bot and tells it which registry owns it. */
     public void add(Bot bot) {
+        bot.setRegistry(this);
         bots.add(bot);
     }
 

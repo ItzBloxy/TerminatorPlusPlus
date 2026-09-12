@@ -29,11 +29,18 @@ public final class BotFactory {
     }
 
     /**
+     * Creates a bot, registers it, and puts it in the world.
+     *
+     * <p>Registration happens before the bot enters the level so that its very first
+     * tick already has a registry to report failures to. Taking the registry as a
+     * parameter rather than reading a global also means a test cannot accidentally
+     * exercise a different registry than the one it asserts on.
+     *
      * @param addToPlayerList when true the bot joins the real PlayerList, so the server
      *                        treats it as an online player. That path is riskier (spec
      *                        section 9 risk 1); callers should default to false.
      */
-    public static Bot spawn(ServerLevel level, Vec3 pos, float yaw, float pitch,
+    public static Bot spawn(BotRegistry registry, ServerLevel level, Vec3 pos, float yaw, float pitch,
                             GameProfile profile, boolean addToPlayerList) {
         MinecraftServer server = level.getServer();
 
@@ -42,6 +49,8 @@ public final class BotFactory {
         bot.setYRot(yaw);
         bot.setXRot(pitch);
         bot.setYHeadRot(yaw);
+
+        registry.add(bot);
 
         if (addToPlayerList) {
             server.getPlayerList().getPlayers().add(bot);

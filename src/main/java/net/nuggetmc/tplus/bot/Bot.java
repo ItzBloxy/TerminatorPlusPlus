@@ -51,6 +51,14 @@ public class Bot extends ServerPlayer {
 
     private boolean inPlayerList;
 
+    /**
+     * The registry that owns this bot. Set by {@link BotRegistry#add(Bot)} before the
+     * bot enters the world, so tick failures and death route to the registry that
+     * actually tracks it rather than to a global singleton — which would make a test
+     * with its own registry silently exercise the wrong object.
+     */
+    private BotRegistry registry;
+
     public Bot(MinecraftServer server, ServerLevel level, GameProfile profile) {
         super(server, level, profile, ClientInformation.createDefault());
 
@@ -59,6 +67,15 @@ public class Bot extends ServerPlayer {
                 new BotConnection(),
                 this,
                 CommonListenerCookie.createInitial(profile, false));
+    }
+
+    void setRegistry(BotRegistry registry) {
+        this.registry = registry;
+    }
+
+    /** Never null in practice; guarded because it is read from a catch block. */
+    public BotRegistry getRegistry() {
+        return registry;
     }
 
     /**
@@ -202,9 +219,17 @@ public class Bot extends ServerPlayer {
     public void tick() {
         try {
             tickInternal();
-            TerminatorPlus.registry().clearTickFailures(this);
+            if (registry != null) {
+                registry.clearTickFailures(this);
+            }
         } catch (Throwable t) {
-            TerminatorPlus.registry().noteTickFailure(this, t);
+            if (registry != null) {
+                registry.noteTickFailure(this, t);
+            } else {
+                // Should not happen: the registry is set before the bot enters the world.
+                TerminatorPlus.LOGGER.error("Untracked bot '{}' failed its tick",
+                        getGameProfile().name(), t);
+            }
         }
     }
 
@@ -278,7 +303,8 @@ public class Bot extends ServerPlayer {
             return false;
         }
 
-        standingOn = GroundCheck.standingOn((ServerLevel) level(), getBoundingBox(), getBbHeight());
+        standingOn = GroundCheck.standingOn(
+                (ServerLevel) level(), getBoundingBox(), position().y, getBbHeight());
         return !standingOn.isEmpty();
     }
 
@@ -332,14 +358,15 @@ public class Bot extends ServerPlayer {
                     continue;
                 }
 
-                // Water, lava, cobweb and vines all have empty collision shapes, and
-                // VoxelShape.bounds() throws on those. The block-identity check below
-                // is what actually matters for them; the intersect test only applies to
-                // NO_FALL blocks that do collide.
-                VoxelShape voxel = state.getCollisionShape(level(), pos);
+                // Water and lava short-circuit, exactly as upstream did.
                 if (block == Blocks.WATER || block == Blocks.LAVA) {
                     return true;
                 }
+
+                // Outline shape, not collision: Bukkit's getBoundingBox() maps to
+                // getShape, and cobweb/vines/powder snow have empty collision shapes.
+                // bounds() throws on an empty shape, so the check is mandatory.
+                VoxelShape voxel = state.getShape(level(), pos);
                 if (voxel.isEmpty()) {
                     continue;
                 }
@@ -393,9 +420,14 @@ public class Bot extends ServerPlayer {
             return;
         }
 
-        TerminatorPlus.registry().remove(this);
         BotFactory.despawn(this);
-        TerminatorPlus.registry().scheduler().runLater(20, this::removeBot);
+
+        if (registry != null) {
+            registry.remove(this);
+            registry.scheduler().runLater(20, this::removeBot);
+        } else {
+            removeBot();
+        }
     }
 
     /**
