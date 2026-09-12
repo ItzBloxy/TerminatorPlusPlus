@@ -24,9 +24,9 @@ import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.BotPhysics;
 import net.nuggetmc.tplus.motion.GroundCheck;
 import net.nuggetmc.tplus.motion.MotionVec;
+import net.nuggetmc.tplus.util.BotUtils;
 
 import java.util.List;
-import java.util.Set;
 
 /**
  * A server-side player bot.
@@ -195,17 +195,6 @@ public class Bot extends ServerPlayer {
 
     private static final float REGEN_PER_TICK = 0.025f;
 
-    /**
-     * Blocks that cancel fall damage. Ported from {@code BotUtils.NO_FALL}; the Paper
-     * build listed Materials, these are the equivalent Blocks.
-     */
-    private static final Set<Block> NO_FALL = Set.of(
-            Blocks.WATER, Blocks.LAVA,
-            Blocks.TWISTING_VINES, Blocks.TWISTING_VINES_PLANT,
-            Blocks.WEEPING_VINES, Blocks.WEEPING_VINES_PLANT,
-            Blocks.SWEET_BERRY_BUSH, Blocks.POWDER_SNOW,
-            Blocks.COBWEB, Blocks.VINE);
-
     private List<BlockPos> standingOn = List.of();
     private boolean removeOnDeath = true;
 
@@ -354,7 +343,7 @@ public class Bot extends ServerPlayer {
                 }
 
                 Block block = state.getBlock();
-                if (!NO_FALL.contains(block)) {
+                if (!BotUtils.NO_FALL.contains(block)) {
                     continue;
                 }
 

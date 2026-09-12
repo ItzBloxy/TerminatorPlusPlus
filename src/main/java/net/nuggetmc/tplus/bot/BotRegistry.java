@@ -2,6 +2,7 @@ package net.nuggetmc.tplus.bot;
 
 import net.minecraft.server.MinecraftServer;
 import net.nuggetmc.tplus.TerminatorPlus;
+import net.nuggetmc.tplus.util.BotLog;
 import net.nuggetmc.tplus.util.TickScheduler;
 
 import java.util.Collection;
@@ -94,8 +95,11 @@ public final class BotRegistry {
                 bot.getGameProfile().name(), count, MAX_CONSECUTIVE_FAILURES, t);
 
         if (count >= MAX_CONSECUTIVE_FAILURES) {
-            TerminatorPlus.LOGGER.error("Evicting bot '{}' after {} consecutive failures",
-                    bot.getGameProfile().name(), count);
+            // The one line Plan B adds rather than translates: an operator watching a bot die
+            // repeatedly could not previously see why without reading the server log.
+            BotLog.debug(bot.level().getServer(),
+                    "Evicting bot '" + bot.getGameProfile().name() + "' after " + count
+                            + " consecutive failures");
             safeRemove(bot);
         }
     }
