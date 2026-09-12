@@ -61,9 +61,9 @@ phases, so a phase boundary is the natural place to stop, review, or split this 
 | Phase | Tasks | End state |
 |---|---|---|
 | 1. Bot action API | 1-5 | An operator-driven bot: punches, looks, sneaks, holds items, places blocks |
-| 2. Events and damage | 6-7 | Shield blocking cancels damage; kills count; mobs ignore bots |
-| 3. PlayerList | 8 | Bots can join the real `PlayerList`, or it is proven impossible with evidence |
-| 4. **The bot hunts** | 9-12 | **Bots locate a target, close on it, swim, and hit it** |
+| 2. Events and damage | 6-8 | Shield blocking cancels damage; kills count; mobs ignore bots |
+| 3. PlayerList | 9 | Bots can join the real `PlayerList`, or it is proven impossible with evidence |
+| 4. **The bot hunts** | 10-12 | **Bots locate a target, close on it, swim, and hit it** |
 | 5. Block rules | 13-15 | The `LegacyMats` predicate surface, tag-backed |
 | 6. Mining | 16-19 | Bots break blocks with crack animation, mine down, tower up |
 | 7. Scan and assembly | 20-25 | Full `tickBot` flow: obstacles, MLG, clutch, boats, lava; the whole command tree |
@@ -128,7 +128,7 @@ becomes the specification. Each site gets a comment naming the upstream line ran
 `Bot.hasNeuralNetwork()` is not added at all, so the omission cannot drift into a silent behaviour
 change — the code will not compile if someone half-restores it.
 
-**5. Six 26.2 renames the plan must use.**
+**5. Eight 26.2 renames the plan must use.**
 
 Found by grepping the patched sources. Every one of them would have compiled as the wrong thing, or
 not at all.
@@ -142,14 +142,26 @@ not at all.
 | Bukkit `EntityType.BOAT`, one type | boats split per wood; `Boat` is `world.entity.vehicle.boat.Boat` | use `EntityTypes.OAK_BOAT`, matching upstream's oak boat item |
 | `Entity.setRot(float,float)` public | `protected` | fine from inside `Bot`; not callable from `Navigation` |
 
-Two more that are unchanged but easy to get wrong: `Entity.getBoundingBox()` is `public final`, so
+The seventh lands on the op check `BotLog` needs: `PlayerList.isOp` now takes a `NameAndId`, not a
+`GameProfile`. `Player.nameAndId()` produces one, so the call is
+`server.getPlayerList().isOp(player.nameAndId())`.
+
+The eighth is the widest: **variant families are no longer individual `Blocks` constants.** This is
+the same breakage the spec cites as the argument for tags, and it bites this plan in three places:
+
+| Looks like | Actually |
+|---|---|
+| `Blocks.CHAIN` | **`Blocks.IRON_CHAIN`** — literally the `Material.CHAIN` to `IRON_CHAIN` rename spec §4.2 names |
+| `Blocks.WHITE_CARPET`, `Blocks.WHITE_STAINED_GLASS_PANE` | `Blocks.CARPET.pick(DyeColor.WHITE)`, `Blocks.STAINED_GLASS_PANE.pick(DyeColor.WHITE)` — dyed families are a `ColorCollection<Block>` |
+| `Blocks.LIGHTNING_ROD` | a `WeatheringCopperCollection<Block>` — rods weather like copper, so identity comparison does not compile. Use `instanceof LightningRodBlock` |
+
+Wherever a rule can be expressed as a tag it is immune to all three, which is the whole argument for
+§4.2's tag strategy — `BlockRules` survives these renames, the explicit sets inside it do not.
+
+Two things that are unchanged but easy to get wrong: `Entity.getBoundingBox()` is `public final`, so
 `getBotBoundingBox()` is a pass-through and **not** an override; and
 `LivingEntity.setItemSlot(EquipmentSlot.MAINHAND, …)` is correct for players, because
 `PlayerEquipment.set` routes `MAINHAND` to `inventory.setSelectedItem`.
-
-A seventh rename lands on the op check `BotLog` needs: `PlayerList.isOp` now takes a
-`NameAndId`, not a `GameProfile`. `Player.nameAndId()` produces one, so the call is
-`server.getPlayerList().isOp(player.nameAndId())`.
 
 **6. Four things spec §4.4 sends to v1 have no v1 caller. Do not create them.**
 
@@ -1526,7 +1538,7 @@ and the field:
      *
      * <p>In v1 this has no caller: its only upstream caller is the neural-network branch of
      * {@code tickBot} (correction 4). It is ported anyway because {@code hurtServer} consults
-     * {@code blocking} in Task 7, and a shield that can never be raised would make that
+     * {@code blocking} in Task 8, and a shield that can never be raised would make that
      * branch untestable.
      */
     public void block(int blockLength, int cooldown) {
@@ -1567,7 +1579,7 @@ and the field:
      * <p>Upstream delegated to vanilla {@code isBlocking()} rather than reading its own
      * {@code blocking} flag, and the two can disagree: vanilla also requires the item to have
      * been in use past its warmup. Delegating is what the Paper build did, so it is what this
-     * does; the private flag stays because the damage path in Task 7 reads it directly, the
+     * does; the private flag stays because the damage path in Task 8 reads it directly, the
      * same way upstream's {@code hurt} did.
      */
     public boolean isBotBlocking() {
@@ -1934,7 +1946,7 @@ git commit -m "feat: add block placing and operator action commands"
 ```
 
 ---
-# Phase 2: Events and the damage path
+# Phase 2: Events, the agent base, and the damage path
 
 ## Task 6: The five event types
 
@@ -2216,7 +2228,7 @@ classes above.
 ./gradlew build
 ```
 
-Expected: `BUILD SUCCESSFUL`. No tests yet — these are value classes, and Task 7 is what exercises
+Expected: `BUILD SUCCESSFUL`. No tests yet — these are value classes, and Task 8 is what exercises
 them. Do not write tests that only assert a getter returns what the constructor was given.
 
 - [ ] **Step 4: Commit**
@@ -2228,761 +2240,7 @@ git commit -m "feat: add the five bot lifecycle events"
 
 ---
 
-## Task 7: The damage path
-
-Upstream overrode `hurt(DamageSource, float)`. In 26.2 the server-side entry point is
-`hurtServer(ServerLevel, DamageSource, float)` — `ServerPlayer` overrides it, so `Bot` overrides
-that. Plan A already **calls** `hurtServer` from `fallDamageCheck` but never overrode it, so all
-four of upstream's damage behaviours are still missing: the player-damage event, the shield-block
-sound, knockback, and the kill credit.
-
-Read the original:
-
-```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '694,760p'
-```
-
-**Files:**
-- Modify: `src/main/java/net/nuggetmc/tplus/bot/Bot.java`
-- Modify: `src/main/java/net/nuggetmc/tplus/bot/BotRegistry.java`
-- Modify: `src/main/java/net/nuggetmc/tplus/TerminatorPlus.java`
-- Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BotCombatTests.java` (new)
-
-- [ ] **Step 1: Write the failing GameTests**
-
-`src/gametest/java/net/nuggetmc/tplus/gametest/BotCombatTests.java`:
-
-```java
-package net.nuggetmc.tplus.gametest;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.GameType;
-import net.minecraft.world.phys.Vec3;
-import net.neoforged.testframework.annotation.ForEachTest;
-import net.neoforged.testframework.gametest.EmptyTemplate;
-import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
-import net.neoforged.testframework.gametest.GameTest;
-import net.nuggetmc.tplus.bot.Bot;
-import net.nuggetmc.tplus.bot.BotFactory;
-import net.nuggetmc.tplus.bot.BotGameProfiles;
-import net.nuggetmc.tplus.bot.BotRegistry;
-import net.nuggetmc.tplus.event.BotDamageByPlayerEvent;
-
-/**
- * In-world tests for the damage path.
- *
- * <p>Bots inherit the level's default gamemode, and the GameTest level is CREATIVE, which makes
- * every damage assertion vacuously true. Plan A was bitten by this; every test here sets
- * SURVIVAL explicitly.
- *
- * <p>A freshly constructed ServerPlayer carries {@code invulnerableTime = 60}, so a hit before
- * the bot has ticked is silently ignored. Tick past it first.
- */
-@ForEachTest(groups = BotCombatTests.GROUP)
-public final class BotCombatTests {
-
-    public static final String GROUP = "bot.combat";
-
-    private BotCombatTests() {
-    }
-
-    private static Bot spawn(ExtendedGameTestHelper helper, BotRegistry registry, BlockPos relative) {
-        ServerLevel level = helper.getLevel();
-        Vec3 pos = Vec3.atBottomCenterOf(helper.absolutePos(relative));
-
-        Bot bot = BotFactory.spawn(registry, level, pos, 0f, 0f,
-                BotGameProfiles.create("CombatBot", null), false);
-        bot.setGameMode(GameType.SURVIVAL);
-        return bot;
-    }
-
-    /** Clears the 60-tick spawn invulnerability. */
-    private static void warmUp(Bot bot) {
-        for (int i = 0; i < 70; i++) {
-            bot.tick();
-        }
-    }
-
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(floor = true)
-    static void a_player_hit_fires_the_damage_event_and_lands(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
-        warmUp(bot);
-
-        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
-        float before = bot.getHealth();
-
-        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 4f);
-
-        helper.assertTrue(bot.getHealth() < before, "an unblocked player hit must reduce health");
-
-        registry.reset();
-        helper.succeed();
-    }
-
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(floor = true)
-    static void a_cancelled_damage_event_stops_the_hit(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
-        warmUp(bot);
-
-        // Stand in for the agent: the real handler cancels when a shield is raised and the
-        // attacker is in front. Here the interest is only that cancelling is honoured, so
-        // the registry's agent is replaced with one that always cancels.
-        registry.setAgent(new AlwaysBlockingAgent(registry));
-
-        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
-        float before = bot.getHealth();
-
-        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 4f);
-
-        helper.assertValueEqual(bot.getHealth(), before, "a cancelled event must not damage the bot");
-
-        registry.reset();
-        helper.succeed();
-    }
-
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(floor = true)
-    static void a_modified_damage_value_is_used(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
-        warmUp(bot);
-
-        registry.setAgent(new HalvingAgent(registry));
-
-        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
-        float before = bot.getHealth();
-
-        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 4f);
-
-        // 4 halved to 2. Upstream read event.getDamage() back after dispatch, so a handler
-        // can soften a hit as well as veto it; nothing in v1 uses it, and it is one line.
-        float taken = before - bot.getHealth();
-        helper.assertTrue(taken > 1.5f && taken < 2.5f, "expected about 2 damage, took " + taken);
-
-        registry.reset();
-        helper.succeed();
-    }
-
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(floor = true)
-    static void a_surviving_hit_knocks_the_bot_back(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
-        warmUp(bot);
-
-        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
-        player.snapTo(helper.absoluteVec(new Vec3(1, 1, 3)), 0f, 0f);
-
-        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 1f);
-
-        // Upstream's kb() replaces the velocity outright rather than adding to it, and the
-        // copy-paste bug in it means both horizontal components come from the X difference.
-        // The only safe assertion is therefore "it moved", not a direction.
-        helper.assertTrue(bot.getVelocity().length() > 0.0,
-                "a surviving bot must be knocked back");
-
-        registry.reset();
-        helper.succeed();
-    }
-
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(floor = true)
-    static void a_non_player_hit_skips_the_event_and_the_knockback(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
-        warmUp(bot);
-        registry.setAgent(new AlwaysBlockingAgent(registry));
-
-        float before = bot.getHealth();
-
-        // No attacker entity at all: upstream's `attacker instanceof ServerPlayer` is false,
-        // so the event never fires and the always-cancelling agent cannot save the bot.
-        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().fall(), 3f);
-
-        helper.assertTrue(bot.getHealth() < before,
-                "non-player damage must bypass BotDamageByPlayerEvent entirely");
-
-        registry.reset();
-        helper.succeed();
-    }
-}
-```
-
-Add the two stub agents at the bottom of the same file, after the class:
-
-```java
-/** Cancels every player hit, standing in for a bot with a raised shield. */
-final class AlwaysBlockingAgent extends net.nuggetmc.tplus.agent.Agent {
-
-    AlwaysBlockingAgent(BotRegistry registry) {
-        super(registry);
-    }
-
-    @Override
-    protected void tick() {
-    }
-
-    @Override
-    public void onPlayerDamage(BotDamageByPlayerEvent event) {
-        event.setCancelled(true);
-    }
-}
-
-/** Halves every player hit, to prove setDamage is read back. */
-final class HalvingAgent extends net.nuggetmc.tplus.agent.Agent {
-
-    HalvingAgent(BotRegistry registry) {
-        super(registry);
-    }
-
-    @Override
-    protected void tick() {
-    }
-
-    @Override
-    public void onPlayerDamage(BotDamageByPlayerEvent event) {
-        event.setDamage(event.getDamage() / 2f);
-    }
-}
-```
-
-These reference `Agent` and `BotRegistry.setAgent`, which Task 9 builds. **Write this test file
-now but expect it not to compile until Task 9**, and run it for the first time at the end of Task 9.
-Everything else in this task can be verified immediately by the two tests that do not need an
-agent — reorder if you prefer, but do not delete the four that do.
-
-- [ ] **Step 2: Override `hurtServer` in `Bot`**
-
-```java
-    /**
-     * Ported from {@code Bot.hurt(DamageSource, float)}. 26.2 renamed the server-side entry
-     * point to {@code hurtServer} and threads the level through it.
-     *
-     * <p>Four behaviours live here, in upstream's order: the player-damage event (which can
-     * veto or soften the hit), the shield-block sound when the hit is refused, knockback for a
-     * hit the bot survives, and the kill credit for one it does not.
-     */
-    @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
-        Entity attacker = source.getEntity();
-
-        // Deliberately NOT `&& !(attacker instanceof Bot)`. Bot extends ServerPlayer, so
-        // upstream's `attacker instanceof ServerPlayer` was true for a bot attacker too —
-        // and that is load-bearing: it is how bot-versus-bot kills get counted, through
-        // Agent.onBotKilledByPlayer looking the killer up in the registry. Excluding bots
-        // here would silently break every NEAREST_BOT goal's kill tally.
-        boolean fromPlayer = attacker instanceof ServerPlayer;
-
-        float damage = amount;
-        ServerPlayer killer = null;
-
-        if (fromPlayer) {
-            killer = (ServerPlayer) attacker;
-
-            BotDamageByPlayerEvent event = new BotDamageByPlayerEvent(this, killer, amount);
-            agent().onPlayerDamage(event);
-
-            if (event.isCancelled()) {
-                return false;
-            }
-
-            damage = event.getDamage();
-        }
-
-        boolean damaged = super.hurtServer(level, source, damage);
-
-        // Upstream keyed this off its own `blocking` flag rather than vanilla isBlocking(),
-        // and the two can disagree — see isBotBlocking. Kept as upstream had it.
-        if (!damaged && blocking) {
-            level.playSound(null, blockPosition(), SoundEvents.SHIELD_BLOCK.value(),
-                    SoundSource.PLAYERS, 1f, 1f);
-        }
-
-        if (damaged && attacker != null) {
-            if (fromPlayer && !isAlive()) {
-                agent().onBotKilledByPlayer(new BotKilledByPlayerEvent(this, killer));
-            } else {
-                kb(position(), attacker.position(), attacker);
-            }
-        }
-
-        return damaged;
-    }
-
-    /**
-     * Knockback, ported from {@code Bot.kb}.
-     *
-     * <p>Two upstream oddities, both preserved. It **replaces** the velocity rather than adding
-     * to it, so a hit cancels whatever the bot was doing. And it reads the Knockback enchantment
-     * off the attacker's main hand, which is the only place in the whole plugin that any
-     * enchantment is consulted.
-     */
-    private void kb(Vec3 self, Vec3 attackerPos, Entity attacker) {
-        MotionVec vel = MotionVec.of(self.subtract(attackerPos)).setY(0).normalize().multiply(0.3);
-
-        if (isBotOnGround()) {
-            vel.multiply(0.8).setY(0.4);
-        }
-
-        if (attacker instanceof LivingEntity living) {
-            int level = knockbackLevel(living);
-
-            if (level == 1) {
-                vel.multiply(1.05).setY(0.4);
-            } else if (level > 1) {
-                vel.multiply(1.9).setY(0.4);
-            }
-        }
-
-        setVelocity(vel);
-    }
-
-    /**
-     * Knockback enchantment level on the attacker's main hand, or 0.
-     *
-     * <p>26.2 keeps enchantments in a data component and looks them up through a registry
-     * holder, so the Bukkit {@code ItemMeta.hasEnchant} test becomes a registry lookup plus an
-     * {@code EnchantmentHelper} query.
-     */
-    private int knockbackLevel(LivingEntity attacker) {
-        return attacker.level().registryAccess()
-                .lookup(Registries.ENCHANTMENT)
-                .flatMap(registry -> registry.get(Enchantments.KNOCKBACK))
-                .map(holder -> EnchantmentHelper.getItemEnchantmentLevel(holder, attacker.getMainHandItem()))
-                .orElse(0);
-    }
-```
-
-Verify the enchantment lookup against the patched sources before trusting the shape above — this
-is the one call in the task with no upstream analogue to check against:
-
-```bash
-grep -n "getItemEnchantmentLevel" /tmp/mcsrc/net/minecraft/world/item/enchantment/EnchantmentHelper.java
-grep -n "KNOCKBACK" /tmp/mcsrc/net/minecraft/world/item/enchantment/Enchantments.java
-```
-
-If the signature differs, keep the behaviour (0 / 1 / >1 tiers) and adjust the call. If the
-registry is unreachable from this context at all, return 0 and note it: a bot that ignores Knockback
-is a smaller deviation than a bot that crashes on being hit with an enchanted sword.
-
-Add imports: `net.minecraft.core.registries.Registries`,
-`net.minecraft.world.damagesource.DamageSource`, `net.minecraft.world.entity.Entity`,
-`net.minecraft.world.item.enchantment.EnchantmentHelper`,
-`net.minecraft.world.item.enchantment.Enchantments`,
-`net.nuggetmc.tplus.event.BotDamageByPlayerEvent`,
-`net.nuggetmc.tplus.event.BotKilledByPlayerEvent`.
-
-`agent()` is a convenience on `Bot` that returns the owning registry's agent, or a do-nothing agent
-when there is no registry — add it in Task 9 along with `Agent` itself, and until then this task
-will not compile. That is expected and is why the phase ends at Task 9's build.
-
-- [ ] **Step 3: Fire the fall-damage event**
-
-Replace the last line of `Bot.fallDamageCheck`:
-
-```java
-        BotFallDamageEvent event = new BotFallDamageEvent(this, List.copyOf(getStandingOn()));
-        agent().onFallDamage(event);
-
-        if (!event.isCancelled()) {
-            hurtServer((ServerLevel) level(), damageSources().fall(), (float) Math.pow(3.6, -oldY));
-        }
-```
-
-The copy is upstream's (`new ArrayList<>(getStandingOn())`) and matters: the handler places blocks,
-which makes `checkGround` recompute `standingOn` underneath it.
-
-- [ ] **Step 4: Bridge the death and mob-target hooks**
-
-Upstream listened to two Bukkit events in `BotManagerImpl`: `EntityDeathEvent` to fire
-`BotDeathEvent`, and `EntityTargetLivingEntityEvent` to stop mobs targeting bots when
-`mobTarget` is off. Both get NeoForge equivalents. Add to `TerminatorPlus`:
-
-```java
-    /**
-     * Bridges NeoForge's drop event into {@code BotDeathEvent}.
-     *
-     * <p>{@code LivingDropsEvent} is the closest thing vanilla has to Bukkit's staged drop list,
-     * and it is the only point at which clearing the drops still suppresses them.
-     */
-    @SubscribeEvent
-    public void onLivingDrops(LivingDropsEvent event) {
-        if (event.getEntity() instanceof Bot bot) {
-            REGISTRY.agent().onBotDeath(
-                    new BotDeathEvent(bot, event.getSource(), event.getDrops()));
-        }
-    }
-
-    /**
-     * Stops mobs picking bots as a target unless it has been turned on.
-     *
-     * <p>Upstream's {@code onMobTarget}. NeoForge's {@code LivingChangeTargetEvent} is fired for
-     * exactly this and cancelling it leaves the previous target in place, which is what Bukkit's
-     * cancellation did too.
-     */
-    @SubscribeEvent
-    public void onChangeTarget(LivingChangeTargetEvent event) {
-        if (REGISTRY.isMobTarget()) {
-            return;
-        }
-
-        if (event.getNewAboutToBeSetTarget() instanceof Bot) {
-            event.setCanceled(true);
-        }
-    }
-```
-
-Add `mobTarget` to `BotRegistry` with a getter and setter, defaulting to **false** — upstream's
-`BotManagerImpl` field default:
-
-```java
-    private boolean mobTarget;
-
-    public boolean isMobTarget() {
-        return mobTarget;
-    }
-
-    public void setMobTarget(boolean mobTarget) {
-        this.mobTarget = mobTarget;
-    }
-```
-
-Also port `onJoin`: upstream re-sent every bot's render packets to a joining player, with a 10-tick
-delay before the last one, because a client that was not connected when the bot spawned has never
-seen it.
-
-```java
-    /**
-     * Renders every live bot to a player who has just joined.
-     *
-     * <p>Upstream's {@code onJoin}. The delay on the final packet is upstream's too: a client
-     * that has only just finished logging in drops entity data sent in the same tick.
-     */
-    @SubscribeEvent
-    public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (!(event.getEntity() instanceof ServerPlayer player) || player instanceof Bot) {
-            return;
-        }
-
-        for (Bot bot : REGISTRY.bots()) {
-            BotFactory.renderTo(bot, player, true);
-        }
-    }
-```
-
-Add `BotFactory.renderTo(Bot, ServerPlayer, boolean login)`, factoring the existing `render(Bot)`
-so the packets are built once and can go to one connection or all of them:
-
-```java
-    /** Sends the packets one client needs in order to draw {@code bot}. */
-    public static void renderTo(Bot bot, ServerPlayer target, boolean login) {
-        Packet<?>[] packets = renderPackets(bot);
-
-        target.connection.send(packets[0]);
-        target.connection.send(packets[1]);
-
-        if (login) {
-            // Upstream delayed the last packet by 10 ticks on login. Without it a client that
-            // has only just joined discards the entity data and the bot renders as a default
-            // skin with no equipment.
-            BotRegistry registry = bot.getRegistry();
-            if (registry != null) {
-                registry.scheduler().runLater(10, () -> target.connection.send(packets[2]));
-            } else {
-                target.connection.send(packets[2]);
-            }
-        } else {
-            target.connection.send(packets[2]);
-        }
-    }
-```
-
-Keep `render(Bot)` as the broadcast form and have both share `renderPackets(Bot)`, which is the
-current body of `render` turned into a `Packet<?>[]` — add-entity, entity-data, rotate-head, in
-that order.
-
-Add imports to `TerminatorPlus`: `net.minecraft.server.level.ServerPlayer`,
-`net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent`,
-`net.neoforged.neoforge.event.entity.living.LivingDropsEvent`,
-`net.neoforged.neoforge.event.entity.player.PlayerEvent`, `net.nuggetmc.tplus.bot.Bot`,
-`net.nuggetmc.tplus.bot.BotFactory`, `net.nuggetmc.tplus.event.BotDeathEvent`.
-
-- [ ] **Step 5: Build**
-
-```bash
-./gradlew build
-```
-
-Expected: **compile failure** on `agent()`, `REGISTRY.agent()` and `registry.setAgent(...)`. That is
-the seam Task 9 closes. Do not stub `Agent` here to get a green build — the stub would be the third
-thing in this plan to become a specification by accident.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/main/java/net/nuggetmc/tplus src/gametest/java/net/nuggetmc/tplus/gametest/BotCombatTests.java
-git commit -m "feat: wire the bot damage path and lifecycle event bridges"
-```
-
----
-
-# Phase 3: The PlayerList path
-
-## Task 8: Bots in the real `PlayerList`
-
-Spec risk 1. Plan A proved the cheap route impossible — `PlayerList.getPlayers()` returns
-`Collections.unmodifiableList(players)`, annotated "Neo: Return an unmodifiable view, we don't want
-people removing things without us knowing" — and deferred the rest here.
-
-**Read `placeNewPlayer` before writing anything**, because the obvious plan is the wrong one:
-
-```bash
-sed -n '145,230p' /tmp/mcsrc/net/minecraft/server/players/PlayerList.java
-```
-
-It does far more than insert into a list. It builds a fresh `ServerGamePacketListenerImpl` and
-rebinds `player.connection`, calls `connection.setupInboundProtocol`, suspends and resumes channel
-flushing, sends the login/difficulty/abilities/held-slot packets, syncs datapacks, recipes,
-the recipe book, the scoreboard and active effects, teleports the player, fires
-`OnDatapackSyncEvent` and `PlayerLoggedInEvent`, and **broadcasts "X joined the game" to everyone
-on the server**.
-
-Upstream's `addToPlayerList` did none of that. It inserted into the list, broadcast
-`createPlayerInitializing`, and called `level.addNewPlayer`. So `placeNewPlayer` is not a faithful
-implementation of this feature — it is a louder one, and the join message alone makes spawning a
-hundred bots unusable.
-
-The faithful route needs one private field, which is what access transformers are for — the port
-already has one for `detectEquipmentUpdates`. Two of the three pieces need no AT at all:
-`getPlayersByUUID()` returns the live map, and `ServerLevel.addNewPlayer` is public.
-
-**Files:**
-- Modify: `src/main/resources/META-INF/accesstransformer.cfg`
-- Modify: `src/main/java/net/nuggetmc/tplus/bot/BotFactory.java`
-- Modify: `src/main/java/net/nuggetmc/tplus/bot/Bot.java` — `removeBot` has a latent crash
-- Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java`
-- Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BotGameTests.java`
-
-- [ ] **Step 1: Fix the latent crash in `removeBot` first**
-
-`Bot.removeBot` currently contains:
-
-```java
-        if (isInPlayerList()) {
-            level().getServer().getPlayerList().getPlayers().remove(this);
-            setInPlayerList(false);
-        }
-```
-
-`getPlayers()` is the unmodifiable view, so this throws `UnsupportedOperationException`. It has
-never fired because `BotFactory.spawn` throws before any bot can reach `inPlayerList = true` — this
-task makes it reachable. Note it, and come back to it in Step 4 once the AT exists.
-
-- [ ] **Step 2: Write the failing GameTests**
-
-Plan A's `BotGameTests` already has a test asserting the playerlist path throws. **Replace it**
-rather than adding alongside, so the suite does not simultaneously claim both behaviours. Find it
-by name:
-
-```bash
-grep -n "playerlist\|PlayerList\|UnsupportedOperation" src/gametest/java/net/nuggetmc/tplus/gametest/BotGameTests.java
-```
-
-Then:
-
-```java
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(value = "5x6x5", floor = true)
-    @TestHolder("bot_joins_the_player_list")
-    static void botJoinsTheRealPlayerList(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        ServerLevel level = helper.getLevel();
-        MinecraftServer server = level.getServer();
-
-        int before = server.getPlayerList().getPlayerCount();
-
-        Bot bot = BotFactory.spawn(registry, level,
-                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
-                BotGameProfiles.create("ListBot", null), true);
-
-        // The whole point of the feature: the server counts the bot as an online player.
-        helper.assertValueEqual(server.getPlayerList().getPlayerCount(), before + 1,
-                "player count after a playerlist spawn");
-        helper.assertTrue(server.getPlayerList().getPlayers().contains(bot),
-                "the bot must be in the player list");
-        helper.assertTrue(bot.isInPlayerList(), "the bot must know it is in the list");
-
-        bot.removeBot();
-
-        helper.assertValueEqual(server.getPlayerList().getPlayerCount(), before,
-                "removeBot must take the bot back out of the list");
-        helper.assertFalse(server.getPlayerList().getPlayers().contains(bot),
-                "the bot must be gone from the player list");
-
-        registry.reset();
-        helper.succeed();
-    }
-
-    @GameTest(timeoutTicks = 200)
-    @EmptyTemplate(value = "5x6x5", floor = true)
-    @TestHolder("playerlist_spawn_is_silent")
-    static void aPlayerListSpawnDoesNotAnnounceAJoin(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        ServerLevel level = helper.getLevel();
-
-        // Upstream's insert was silent. placeNewPlayer would broadcast "ListBot joined the
-        // game" to every player, which is why this task does not use it. There is no clean
-        // hook to assert the absence of a broadcast, so this asserts the thing that proves
-        // placeNewPlayer was not used: the bot's connection is still the fake one the factory
-        // gave it, not a fresh ServerGamePacketListenerImpl built around a real Connection.
-        Bot bot = BotFactory.spawn(registry, level,
-                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
-                BotGameProfiles.create("QuietBot", null), true);
-
-        helper.assertTrue(bot.connection != null, "the bot keeps a packet listener");
-        helper.assertTrue(bot.connection.getConnection() instanceof BotConnection,
-                "the bot's connection must still be BotConnection");
-
-        registry.reset();
-        helper.succeed();
-    }
-```
-
-Confirm the accessor name before running — `ServerGamePacketListenerImpl` exposes its `Connection`
-and the getter has moved before:
-
-```bash
-grep -nE "public Connection get|protected final Connection" /tmp/mcsrc/net/minecraft/server/network/ServerGamePacketListenerImpl.java /tmp/mcsrc/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
-```
-
-- [ ] **Step 3: Add the access transformer entry**
-
-Append to `src/main/resources/META-INF/accesstransformer.cfg`:
-
-```
-# Bots can optionally join the real PlayerList, which upstream did with a plain
-# getPlayers().add(bot). NeoForge deliberately narrowed getPlayers() to an unmodifiable view, so
-# the backing list is the only way to reproduce that without placeNewPlayer's side effects (a
-# join broadcast, PlayerLoggedInEvent, a datapack and recipe sync, a teleport). See Plan B task 8.
-# playersByUUID needs no entry: getPlayersByUUID() already returns the live map.
-public net.minecraft.server.players.PlayerList players
-```
-
-- [ ] **Step 4: Implement the spawn and removal paths**
-
-In `BotFactory.spawn`, replace the `throw` with:
-
-```java
-        if (addToPlayerList) {
-            PlayerList list = server.getPlayerList();
-
-            // Upstream did this, and only this: insert, announce, add to the level. See the
-            // access transformer for why the field rather than getPlayers().
-            list.players.add(bot);
-            bot.setInPlayerList(true);
-
-            broadcast(bot, ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(bot)));
-            level.addNewPlayer(bot);
-        } else {
-            level.addFreshEntity(bot);
-            broadcast(bot, new ClientboundPlayerInfoUpdatePacket(
-                    ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER, bot));
-        }
-```
-
-**Do not** also put the bot in `playersByUUID`. Upstream did not, so `server.getPlayerList()
-.getPlayer(uuid)` does not find a playerlist bot, and that asymmetry is upstream's. It is recorded
-here because it looks exactly like an oversight to fix: doing so would change which entities
-vanilla systems can resolve by UUID, and nothing in this port needs it.
-
-In `Bot.removeBot`, fix the crash from Step 1:
-
-```java
-        if (isInPlayerList()) {
-            // Not getPlayers(): that is an unmodifiable view and removing through it throws.
-            // Mirrors the insert in BotFactory.spawn.
-            level().getServer().getPlayerList().players.remove(this);
-            setInPlayerList(false);
-        }
-```
-
-`PlayerList.remove(ServerPlayer)` is public and would do a tidier job — it also clears advancement
-triggers, removes the entity and broadcasts the info-remove packet. It is **not** used here because
-it additionally calls `save(player)`, writing a playerdata file per bot, and fires
-`PlayerLoggedOut`. Upstream fired neither. If disk churn ever stops mattering more than tidiness,
-that swap is a one-liner.
-
-- [ ] **Step 5: Expose the option on the command**
-
-`BotCommands.create` already takes a `playerList` flag that nothing sets. Wire it up, and delete
-the comment saying the path is unsupported:
-
-```java
-        root.then(Commands.literal("create")
-                .then(Commands.argument("name", StringArgumentType.string())
-                        .executes(ctx -> create(ctx, 1, false))
-                        .then(Commands.argument("count", IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
-                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false))
-                                .then(Commands.literal("playerlist")
-                                        .executes(ctx -> create(ctx,
-                                                IntegerArgumentType.getInteger(ctx, "count"), true))))));
-```
-
-- [ ] **Step 6: Run the GameTests**
-
-```bash
-./gradlew runGameTestServer
-```
-
-Expected: both new tests pass, and the old "playerlist throws" test is gone.
-
-**If a vanilla code path throws instead** — most likely something iterating `players` and touching
-a field a real join would have initialised — do not start adding ATs to chase it. Record exactly
-which call failed, revert to the `UnsupportedOperationException` with that evidence in the message,
-and move on: everything after this task is independent of it, and a documented "not supported,
-because X throws" is a better outcome than a half-working join path. Spec risk 1 is then closed
-either way.
-
-- [ ] **Step 7: Verify by hand**
-
-```bash
-./gradlew runServer > run-server.log 2>&1
-```
-
-```
-/tplus create Listed 2 playerlist
-/list
-```
-
-`/list` should count the bots, and they should appear in the client's tab list with skins. Then
-`/tplus removeall` and confirm `/list` returns to just you — that is the removal path, which is the
-half most likely to be broken.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add src/main/java/net/nuggetmc/tplus src/main/resources/META-INF/accesstransformer.cfg src/gametest/java/net/nuggetmc/tplus/gametest/BotGameTests.java
-git commit -m "feat: support bots in the real PlayerList; fix removeBot crash"
-```
-
----
-# Phase 4: The bot hunts
-
-The milestone. By the end of Task 12 a bot spawned with `/tplus create` picks a target, turns to
-face it, closes the distance by jumping toward it, swims when it is in water, and hits it when it is
-in range. Everything the bot does to *terrain* — mining, towering, clutching — is Phases 5 to 7.
-
-That split works because `tickBot`'s terrain branches all funnel into `preBreak`, and each of them
-returns a boolean meaning "handled, stop here". Task 12 lands the flow with those branches absent
-rather than stubbed, and each later task inserts its branch in upstream's position. The order of the
-checks is load-bearing and is written out in Task 12 so later tasks have somewhere exact to insert.
-
-## Task 9: `Agent` and `AgentState`
+## Task 7: `Agent` and `AgentState`
 
 Two classes and a rewiring. `Agent` loses Bukkit's scheduler and plugin handle; `AgentState` is the
 bag of twelve mutable collections that spec §4.3 says to move wholesale rather than distribute.
@@ -3477,8 +2735,8 @@ animations and shield timers:
 ./gradlew build && ./gradlew runGameTestServer
 ```
 
-Expected: `BUILD SUCCESSFUL`, 57 unit tests passing, and the Task 7 combat GameTests now compile
-and pass — that is the seam from Phase 2 closing. Total GameTests: 45.
+Expected: `BUILD SUCCESSFUL` and 57 unit tests passing. The GameTests that exercise this land in
+Task 8, which is the next task.
 
 - [ ] **Step 9: Commit**
 
@@ -3488,6 +2746,757 @@ git commit -m "feat: add the Agent base, AgentState and registry wiring"
 ```
 
 ---
+
+## Task 8: The damage path
+
+Upstream overrode `hurt(DamageSource, float)`. In 26.2 the server-side entry point is
+`hurtServer(ServerLevel, DamageSource, float)` — `ServerPlayer` overrides it, so `Bot` overrides
+that. Plan A already **calls** `hurtServer` from `fallDamageCheck` but never overrode it, so all
+four of upstream's damage behaviours are still missing: the player-damage event, the shield-block
+sound, knockback, and the kill credit.
+
+Read the original:
+
+```bash
+git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '694,760p'
+```
+
+**Files:**
+- Modify: `src/main/java/net/nuggetmc/tplus/bot/Bot.java`
+- Modify: `src/main/java/net/nuggetmc/tplus/bot/BotRegistry.java`
+- Modify: `src/main/java/net/nuggetmc/tplus/TerminatorPlus.java`
+- Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BotCombatTests.java` (new)
+
+- [ ] **Step 1: Write the failing GameTests**
+
+`src/gametest/java/net/nuggetmc/tplus/gametest/BotCombatTests.java`:
+
+```java
+package net.nuggetmc.tplus.gametest;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.testframework.annotation.ForEachTest;
+import net.neoforged.testframework.gametest.EmptyTemplate;
+import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
+import net.neoforged.testframework.gametest.GameTest;
+import net.nuggetmc.tplus.bot.Bot;
+import net.nuggetmc.tplus.bot.BotFactory;
+import net.nuggetmc.tplus.bot.BotGameProfiles;
+import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.event.BotDamageByPlayerEvent;
+
+/**
+ * In-world tests for the damage path.
+ *
+ * <p>Bots inherit the level's default gamemode, and the GameTest level is CREATIVE, which makes
+ * every damage assertion vacuously true. Plan A was bitten by this; every test here sets
+ * SURVIVAL explicitly.
+ *
+ * <p>A freshly constructed ServerPlayer carries {@code invulnerableTime = 60}, so a hit before
+ * the bot has ticked is silently ignored. Tick past it first.
+ */
+@ForEachTest(groups = BotCombatTests.GROUP)
+public final class BotCombatTests {
+
+    public static final String GROUP = "bot.combat";
+
+    private BotCombatTests() {
+    }
+
+    private static Bot spawn(ExtendedGameTestHelper helper, BotRegistry registry, BlockPos relative) {
+        ServerLevel level = helper.getLevel();
+        Vec3 pos = Vec3.atBottomCenterOf(helper.absolutePos(relative));
+
+        Bot bot = BotFactory.spawn(registry, level, pos, 0f, 0f,
+                BotGameProfiles.create("CombatBot", null), false);
+        bot.setGameMode(GameType.SURVIVAL);
+        return bot;
+    }
+
+    /** Clears the 60-tick spawn invulnerability. */
+    private static void warmUp(Bot bot) {
+        for (int i = 0; i < 70; i++) {
+            bot.tick();
+        }
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(floor = true)
+    static void a_player_hit_fires_the_damage_event_and_lands(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        warmUp(bot);
+
+        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
+        float before = bot.getHealth();
+
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 4f);
+
+        helper.assertTrue(bot.getHealth() < before, "an unblocked player hit must reduce health");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(floor = true)
+    static void a_cancelled_damage_event_stops_the_hit(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        warmUp(bot);
+
+        // Stand in for the agent: the real handler cancels when a shield is raised and the
+        // attacker is in front. Here the interest is only that cancelling is honoured, so
+        // the registry's agent is replaced with one that always cancels.
+        registry.setAgent(new AlwaysBlockingAgent(registry));
+
+        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
+        float before = bot.getHealth();
+
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 4f);
+
+        helper.assertValueEqual(bot.getHealth(), before, "a cancelled event must not damage the bot");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(floor = true)
+    static void a_modified_damage_value_is_used(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        warmUp(bot);
+
+        registry.setAgent(new HalvingAgent(registry));
+
+        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
+        float before = bot.getHealth();
+
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 4f);
+
+        // 4 halved to 2. Upstream read event.getDamage() back after dispatch, so a handler
+        // can soften a hit as well as veto it; nothing in v1 uses it, and it is one line.
+        float taken = before - bot.getHealth();
+        helper.assertTrue(taken > 1.5f && taken < 2.5f, "expected about 2 damage, took " + taken);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(floor = true)
+    static void a_surviving_hit_knocks_the_bot_back(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
+        warmUp(bot);
+
+        var player = helper.makeMockServerPlayer(GameType.SURVIVAL);
+        player.snapTo(helper.absoluteVec(new Vec3(1, 1, 3)), 0f, 0f);
+
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().playerAttack(player), 1f);
+
+        // Upstream's kb() replaces the velocity outright rather than adding to it, and the
+        // copy-paste bug in it means both horizontal components come from the X difference.
+        // The only safe assertion is therefore "it moved", not a direction.
+        helper.assertTrue(bot.getVelocity().length() > 0.0,
+                "a surviving bot must be knocked back");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(floor = true)
+    static void a_non_player_hit_skips_the_event_and_the_knockback(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        warmUp(bot);
+        registry.setAgent(new AlwaysBlockingAgent(registry));
+
+        float before = bot.getHealth();
+
+        // No attacker entity at all: upstream's `attacker instanceof ServerPlayer` is false,
+        // so the event never fires and the always-cancelling agent cannot save the bot.
+        bot.hurtServer(helper.getLevel(), helper.getLevel().damageSources().fall(), 3f);
+
+        helper.assertTrue(bot.getHealth() < before,
+                "non-player damage must bypass BotDamageByPlayerEvent entirely");
+
+        registry.reset();
+        helper.succeed();
+    }
+}
+```
+
+Add the two stub agents at the bottom of the same file, after the class:
+
+```java
+/** Cancels every player hit, standing in for a bot with a raised shield. */
+final class AlwaysBlockingAgent extends net.nuggetmc.tplus.agent.Agent {
+
+    AlwaysBlockingAgent(BotRegistry registry) {
+        super(registry);
+    }
+
+    @Override
+    protected void tick() {
+    }
+
+    @Override
+    public void onPlayerDamage(BotDamageByPlayerEvent event) {
+        event.setCancelled(true);
+    }
+}
+
+/** Halves every player hit, to prove setDamage is read back. */
+final class HalvingAgent extends net.nuggetmc.tplus.agent.Agent {
+
+    HalvingAgent(BotRegistry registry) {
+        super(registry);
+    }
+
+    @Override
+    protected void tick() {
+    }
+
+    @Override
+    public void onPlayerDamage(BotDamageByPlayerEvent event) {
+        event.setDamage(event.getDamage() / 2f);
+    }
+}
+```
+
+These reference `Agent` and `BotRegistry.setAgent` from Task 7, so they compile and run as soon as
+this task's code lands.
+
+- [ ] **Step 2: Override `hurtServer` in `Bot`**
+
+```java
+    /**
+     * Ported from {@code Bot.hurt(DamageSource, float)}. 26.2 renamed the server-side entry
+     * point to {@code hurtServer} and threads the level through it.
+     *
+     * <p>Four behaviours live here, in upstream's order: the player-damage event (which can
+     * veto or soften the hit), the shield-block sound when the hit is refused, knockback for a
+     * hit the bot survives, and the kill credit for one it does not.
+     */
+    @Override
+    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+        Entity attacker = source.getEntity();
+
+        // Deliberately NOT `&& !(attacker instanceof Bot)`. Bot extends ServerPlayer, so
+        // upstream's `attacker instanceof ServerPlayer` was true for a bot attacker too —
+        // and that is load-bearing: it is how bot-versus-bot kills get counted, through
+        // Agent.onBotKilledByPlayer looking the killer up in the registry. Excluding bots
+        // here would silently break every NEAREST_BOT goal's kill tally.
+        boolean fromPlayer = attacker instanceof ServerPlayer;
+
+        float damage = amount;
+        ServerPlayer killer = null;
+
+        if (fromPlayer) {
+            killer = (ServerPlayer) attacker;
+
+            BotDamageByPlayerEvent event = new BotDamageByPlayerEvent(this, killer, amount);
+            agent().onPlayerDamage(event);
+
+            if (event.isCancelled()) {
+                return false;
+            }
+
+            damage = event.getDamage();
+        }
+
+        boolean damaged = super.hurtServer(level, source, damage);
+
+        // Upstream keyed this off its own `blocking` flag rather than vanilla isBlocking(),
+        // and the two can disagree — see isBotBlocking. Kept as upstream had it.
+        if (!damaged && blocking) {
+            level.playSound(null, blockPosition(), SoundEvents.SHIELD_BLOCK.value(),
+                    SoundSource.PLAYERS, 1f, 1f);
+        }
+
+        if (damaged && attacker != null) {
+            if (fromPlayer && !isAlive()) {
+                agent().onBotKilledByPlayer(new BotKilledByPlayerEvent(this, killer));
+            } else {
+                kb(position(), attacker.position(), attacker);
+            }
+        }
+
+        return damaged;
+    }
+
+    /**
+     * Knockback, ported from {@code Bot.kb}.
+     *
+     * <p>Two upstream oddities, both preserved. It **replaces** the velocity rather than adding
+     * to it, so a hit cancels whatever the bot was doing. And it reads the Knockback enchantment
+     * off the attacker's main hand, which is the only place in the whole plugin that any
+     * enchantment is consulted.
+     */
+    private void kb(Vec3 self, Vec3 attackerPos, Entity attacker) {
+        MotionVec vel = MotionVec.of(self.subtract(attackerPos)).setY(0).normalize().multiply(0.3);
+
+        if (isBotOnGround()) {
+            vel.multiply(0.8).setY(0.4);
+        }
+
+        if (attacker instanceof LivingEntity living) {
+            int level = knockbackLevel(living);
+
+            if (level == 1) {
+                vel.multiply(1.05).setY(0.4);
+            } else if (level > 1) {
+                vel.multiply(1.9).setY(0.4);
+            }
+        }
+
+        setVelocity(vel);
+    }
+
+    /**
+     * Knockback enchantment level on the attacker's main hand, or 0.
+     *
+     * <p>26.2 keeps enchantments in a data component and looks them up through a registry
+     * holder, so the Bukkit {@code ItemMeta.hasEnchant} test becomes a registry lookup plus an
+     * {@code EnchantmentHelper} query.
+     */
+    private int knockbackLevel(LivingEntity attacker) {
+        return attacker.level().registryAccess()
+                .lookup(Registries.ENCHANTMENT)
+                .flatMap(registry -> registry.get(Enchantments.KNOCKBACK))
+                .map(holder -> EnchantmentHelper.getItemEnchantmentLevel(holder, attacker.getMainHandItem()))
+                .orElse(0);
+    }
+```
+
+Verify the enchantment lookup against the patched sources before trusting the shape above — this
+is the one call in the task with no upstream analogue to check against:
+
+```bash
+grep -n "getItemEnchantmentLevel" /tmp/mcsrc/net/minecraft/world/item/enchantment/EnchantmentHelper.java
+grep -n "KNOCKBACK" /tmp/mcsrc/net/minecraft/world/item/enchantment/Enchantments.java
+```
+
+If the signature differs, keep the behaviour (0 / 1 / >1 tiers) and adjust the call. If the
+registry is unreachable from this context at all, return 0 and note it: a bot that ignores Knockback
+is a smaller deviation than a bot that crashes on being hit with an enchanted sword.
+
+Add imports: `net.minecraft.core.registries.Registries`,
+`net.minecraft.world.damagesource.DamageSource`, `net.minecraft.world.entity.Entity`,
+`net.minecraft.world.item.enchantment.EnchantmentHelper`,
+`net.minecraft.world.item.enchantment.Enchantments`,
+`net.nuggetmc.tplus.event.BotDamageByPlayerEvent`,
+`net.nuggetmc.tplus.event.BotKilledByPlayerEvent`.
+
+`agent()` is a convenience on `Bot` that returns the owning registry's agent, or a do-nothing agent
+when there is no registry. Task 7 added it.
+
+- [ ] **Step 3: Fire the fall-damage event**
+
+Replace the last line of `Bot.fallDamageCheck`:
+
+```java
+        BotFallDamageEvent event = new BotFallDamageEvent(this, List.copyOf(getStandingOn()));
+        agent().onFallDamage(event);
+
+        if (!event.isCancelled()) {
+            hurtServer((ServerLevel) level(), damageSources().fall(), (float) Math.pow(3.6, -oldY));
+        }
+```
+
+The copy is upstream's (`new ArrayList<>(getStandingOn())`) and matters: the handler places blocks,
+which makes `checkGround` recompute `standingOn` underneath it.
+
+- [ ] **Step 4: Bridge the death and mob-target hooks**
+
+Upstream listened to two Bukkit events in `BotManagerImpl`: `EntityDeathEvent` to fire
+`BotDeathEvent`, and `EntityTargetLivingEntityEvent` to stop mobs targeting bots when
+`mobTarget` is off. Both get NeoForge equivalents. Add to `TerminatorPlus`:
+
+```java
+    /**
+     * Bridges NeoForge's drop event into {@code BotDeathEvent}.
+     *
+     * <p>{@code LivingDropsEvent} is the closest thing vanilla has to Bukkit's staged drop list,
+     * and it is the only point at which clearing the drops still suppresses them.
+     */
+    @SubscribeEvent
+    public void onLivingDrops(LivingDropsEvent event) {
+        if (event.getEntity() instanceof Bot bot) {
+            REGISTRY.agent().onBotDeath(
+                    new BotDeathEvent(bot, event.getSource(), event.getDrops()));
+        }
+    }
+
+    /**
+     * Stops mobs picking bots as a target unless it has been turned on.
+     *
+     * <p>Upstream's {@code onMobTarget}. NeoForge's {@code LivingChangeTargetEvent} is fired for
+     * exactly this and cancelling it leaves the previous target in place, which is what Bukkit's
+     * cancellation did too.
+     */
+    @SubscribeEvent
+    public void onChangeTarget(LivingChangeTargetEvent event) {
+        if (REGISTRY.isMobTarget()) {
+            return;
+        }
+
+        if (event.getNewAboutToBeSetTarget() instanceof Bot) {
+            event.setCanceled(true);
+        }
+    }
+```
+
+Add `mobTarget` to `BotRegistry` with a getter and setter, defaulting to **false** — upstream's
+`BotManagerImpl` field default:
+
+```java
+    private boolean mobTarget;
+
+    public boolean isMobTarget() {
+        return mobTarget;
+    }
+
+    public void setMobTarget(boolean mobTarget) {
+        this.mobTarget = mobTarget;
+    }
+```
+
+Also port `onJoin`: upstream re-sent every bot's render packets to a joining player, with a 10-tick
+delay before the last one, because a client that was not connected when the bot spawned has never
+seen it.
+
+```java
+    /**
+     * Renders every live bot to a player who has just joined.
+     *
+     * <p>Upstream's {@code onJoin}. The delay on the final packet is upstream's too: a client
+     * that has only just finished logging in drops entity data sent in the same tick.
+     */
+    @SubscribeEvent
+    public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player) || player instanceof Bot) {
+            return;
+        }
+
+        for (Bot bot : REGISTRY.bots()) {
+            BotFactory.renderTo(bot, player, true);
+        }
+    }
+```
+
+Add `BotFactory.renderTo(Bot, ServerPlayer, boolean login)`, factoring the existing `render(Bot)`
+so the packets are built once and can go to one connection or all of them:
+
+```java
+    /** Sends the packets one client needs in order to draw {@code bot}. */
+    public static void renderTo(Bot bot, ServerPlayer target, boolean login) {
+        Packet<?>[] packets = renderPackets(bot);
+
+        target.connection.send(packets[0]);
+        target.connection.send(packets[1]);
+
+        if (login) {
+            // Upstream delayed the last packet by 10 ticks on login. Without it a client that
+            // has only just joined discards the entity data and the bot renders as a default
+            // skin with no equipment.
+            BotRegistry registry = bot.getRegistry();
+            if (registry != null) {
+                registry.scheduler().runLater(10, () -> target.connection.send(packets[2]));
+            } else {
+                target.connection.send(packets[2]);
+            }
+        } else {
+            target.connection.send(packets[2]);
+        }
+    }
+```
+
+Keep `render(Bot)` as the broadcast form and have both share `renderPackets(Bot)`, which is the
+current body of `render` turned into a `Packet<?>[]` — add-entity, entity-data, rotate-head, in
+that order.
+
+Add imports to `TerminatorPlus`: `net.minecraft.server.level.ServerPlayer`,
+`net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent`,
+`net.neoforged.neoforge.event.entity.living.LivingDropsEvent`,
+`net.neoforged.neoforge.event.entity.player.PlayerEvent`, `net.nuggetmc.tplus.bot.Bot`,
+`net.nuggetmc.tplus.bot.BotFactory`, `net.nuggetmc.tplus.event.BotDeathEvent`.
+
+- [ ] **Step 5: Build and run the combat tests**
+
+```bash
+./gradlew build && ./gradlew runGameTestServer
+```
+
+Expected: `BUILD SUCCESSFUL` and the five `bot.combat` tests passing. Task 7 put `Agent`,
+`BotRegistry.setAgent` and `Bot.agent()` in place, so nothing here is left dangling — if this task
+does not compile, something in Task 7 was skipped.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/main/java/net/nuggetmc/tplus src/gametest/java/net/nuggetmc/tplus/gametest/BotCombatTests.java
+git commit -m "feat: wire the bot damage path and lifecycle event bridges"
+```
+
+---
+
+# Phase 3: The PlayerList path
+
+## Task 9: Bots in the real `PlayerList`
+
+Spec risk 1. Plan A proved the cheap route impossible — `PlayerList.getPlayers()` returns
+`Collections.unmodifiableList(players)`, annotated "Neo: Return an unmodifiable view, we don't want
+people removing things without us knowing" — and deferred the rest here.
+
+**Read `placeNewPlayer` before writing anything**, because the obvious plan is the wrong one:
+
+```bash
+sed -n '145,230p' /tmp/mcsrc/net/minecraft/server/players/PlayerList.java
+```
+
+It does far more than insert into a list. It builds a fresh `ServerGamePacketListenerImpl` and
+rebinds `player.connection`, calls `connection.setupInboundProtocol`, suspends and resumes channel
+flushing, sends the login/difficulty/abilities/held-slot packets, syncs datapacks, recipes,
+the recipe book, the scoreboard and active effects, teleports the player, fires
+`OnDatapackSyncEvent` and `PlayerLoggedInEvent`, and **broadcasts "X joined the game" to everyone
+on the server**.
+
+Upstream's `addToPlayerList` did none of that. It inserted into the list, broadcast
+`createPlayerInitializing`, and called `level.addNewPlayer`. So `placeNewPlayer` is not a faithful
+implementation of this feature — it is a louder one, and the join message alone makes spawning a
+hundred bots unusable.
+
+The faithful route needs one private field, which is what access transformers are for — the port
+already has one for `detectEquipmentUpdates`. Two of the three pieces need no AT at all:
+`getPlayersByUUID()` returns the live map, and `ServerLevel.addNewPlayer` is public.
+
+**Files:**
+- Modify: `src/main/resources/META-INF/accesstransformer.cfg`
+- Modify: `src/main/java/net/nuggetmc/tplus/bot/BotFactory.java`
+- Modify: `src/main/java/net/nuggetmc/tplus/bot/Bot.java` — `removeBot` has a latent crash
+- Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java`
+- Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BotGameTests.java`
+
+- [ ] **Step 1: Fix the latent crash in `removeBot` first**
+
+`Bot.removeBot` currently contains:
+
+```java
+        if (isInPlayerList()) {
+            level().getServer().getPlayerList().getPlayers().remove(this);
+            setInPlayerList(false);
+        }
+```
+
+`getPlayers()` is the unmodifiable view, so this throws `UnsupportedOperationException`. It has
+never fired because `BotFactory.spawn` throws before any bot can reach `inPlayerList = true` — this
+task makes it reachable. Note it, and come back to it in Step 4 once the AT exists.
+
+- [ ] **Step 2: Write the failing GameTests**
+
+Plan A's `BotGameTests` already has a test asserting the playerlist path throws. **Replace it**
+rather than adding alongside, so the suite does not simultaneously claim both behaviours. Find it
+by name:
+
+```bash
+grep -n "playerlist\|PlayerList\|UnsupportedOperation" src/gametest/java/net/nuggetmc/tplus/gametest/BotGameTests.java
+```
+
+Then:
+
+```java
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("bot_joins_the_player_list")
+    static void botJoinsTheRealPlayerList(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        ServerLevel level = helper.getLevel();
+        MinecraftServer server = level.getServer();
+
+        int before = server.getPlayerList().getPlayerCount();
+
+        Bot bot = BotFactory.spawn(registry, level,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
+                BotGameProfiles.create("ListBot", null), true);
+
+        // The whole point of the feature: the server counts the bot as an online player.
+        helper.assertValueEqual(server.getPlayerList().getPlayerCount(), before + 1,
+                "player count after a playerlist spawn");
+        helper.assertTrue(server.getPlayerList().getPlayers().contains(bot),
+                "the bot must be in the player list");
+        helper.assertTrue(bot.isInPlayerList(), "the bot must know it is in the list");
+
+        bot.removeBot();
+
+        helper.assertValueEqual(server.getPlayerList().getPlayerCount(), before,
+                "removeBot must take the bot back out of the list");
+        helper.assertFalse(server.getPlayerList().getPlayers().contains(bot),
+                "the bot must be gone from the player list");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("playerlist_spawn_is_silent")
+    static void aPlayerListSpawnDoesNotAnnounceAJoin(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        ServerLevel level = helper.getLevel();
+
+        // Upstream's insert was silent. placeNewPlayer would broadcast "ListBot joined the
+        // game" to every player, which is why this task does not use it. There is no clean
+        // hook to assert the absence of a broadcast, so this asserts the thing that proves
+        // placeNewPlayer was not used: the bot's connection is still the fake one the factory
+        // gave it, not a fresh ServerGamePacketListenerImpl built around a real Connection.
+        Bot bot = BotFactory.spawn(registry, level,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
+                BotGameProfiles.create("QuietBot", null), true);
+
+        helper.assertTrue(bot.connection != null, "the bot keeps a packet listener");
+        helper.assertTrue(bot.connection.getConnection() instanceof BotConnection,
+                "the bot's connection must still be BotConnection");
+
+        registry.reset();
+        helper.succeed();
+    }
+```
+
+Confirm the accessor name before running — `ServerGamePacketListenerImpl` exposes its `Connection`
+and the getter has moved before:
+
+```bash
+grep -nE "public Connection get|protected final Connection" /tmp/mcsrc/net/minecraft/server/network/ServerGamePacketListenerImpl.java /tmp/mcsrc/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+```
+
+- [ ] **Step 3: Add the access transformer entry**
+
+Append to `src/main/resources/META-INF/accesstransformer.cfg`:
+
+```
+# Bots can optionally join the real PlayerList, which upstream did with a plain
+# getPlayers().add(bot). NeoForge deliberately narrowed getPlayers() to an unmodifiable view, so
+# the backing list is the only way to reproduce that without placeNewPlayer's side effects (a
+# join broadcast, PlayerLoggedInEvent, a datapack and recipe sync, a teleport). See Plan B task 9.
+# playersByUUID needs no entry: getPlayersByUUID() already returns the live map.
+public net.minecraft.server.players.PlayerList players
+```
+
+- [ ] **Step 4: Implement the spawn and removal paths**
+
+In `BotFactory.spawn`, replace the `throw` with:
+
+```java
+        if (addToPlayerList) {
+            PlayerList list = server.getPlayerList();
+
+            // Upstream did this, and only this: insert, announce, add to the level. See the
+            // access transformer for why the field rather than getPlayers().
+            list.players.add(bot);
+            bot.setInPlayerList(true);
+
+            broadcast(bot, ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(bot)));
+            level.addNewPlayer(bot);
+        } else {
+            level.addFreshEntity(bot);
+            broadcast(bot, new ClientboundPlayerInfoUpdatePacket(
+                    ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER, bot));
+        }
+```
+
+**Do not** also put the bot in `playersByUUID`. Upstream did not, so `server.getPlayerList()
+.getPlayer(uuid)` does not find a playerlist bot, and that asymmetry is upstream's. It is recorded
+here because it looks exactly like an oversight to fix: doing so would change which entities
+vanilla systems can resolve by UUID, and nothing in this port needs it.
+
+In `Bot.removeBot`, fix the crash from Step 1:
+
+```java
+        if (isInPlayerList()) {
+            // Not getPlayers(): that is an unmodifiable view and removing through it throws.
+            // Mirrors the insert in BotFactory.spawn.
+            level().getServer().getPlayerList().players.remove(this);
+            setInPlayerList(false);
+        }
+```
+
+`PlayerList.remove(ServerPlayer)` is public and would do a tidier job — it also clears advancement
+triggers, removes the entity and broadcasts the info-remove packet. It is **not** used here because
+it additionally calls `save(player)`, writing a playerdata file per bot, and fires
+`PlayerLoggedOut`. Upstream fired neither. If disk churn ever stops mattering more than tidiness,
+that swap is a one-liner.
+
+- [ ] **Step 5: Expose the option on the command**
+
+`BotCommands.create` already takes a `playerList` flag that nothing sets. Wire it up, and delete
+the comment saying the path is unsupported:
+
+```java
+        root.then(Commands.literal("create")
+                .then(Commands.argument("name", StringArgumentType.string())
+                        .executes(ctx -> create(ctx, 1, false))
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
+                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false))
+                                .then(Commands.literal("playerlist")
+                                        .executes(ctx -> create(ctx,
+                                                IntegerArgumentType.getInteger(ctx, "count"), true))))));
+```
+
+- [ ] **Step 6: Run the GameTests**
+
+```bash
+./gradlew runGameTestServer
+```
+
+Expected: both new tests pass, and the old "playerlist throws" test is gone.
+
+**If a vanilla code path throws instead** — most likely something iterating `players` and touching
+a field a real join would have initialised — do not start adding ATs to chase it. Record exactly
+which call failed, revert to the `UnsupportedOperationException` with that evidence in the message,
+and move on: everything after this task is independent of it, and a documented "not supported,
+because X throws" is a better outcome than a half-working join path. Spec risk 1 is then closed
+either way.
+
+- [ ] **Step 7: Verify by hand**
+
+```bash
+./gradlew runServer > run-server.log 2>&1
+```
+
+```
+/tplus create Listed 2 playerlist
+/list
+```
+
+`/list` should count the bots, and they should appear in the client's tab list with skins. Then
+`/tplus removeall` and confirm `/list` returns to just you — that is the removal path, which is the
+half most likely to be broken.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/main/java/net/nuggetmc/tplus src/main/resources/META-INF/accesstransformer.cfg src/gametest/java/net/nuggetmc/tplus/gametest/BotGameTests.java
+git commit -m "feat: support bots in the real PlayerList; fix removeBot crash"
+```
+
+---
+# Phase 4: The bot hunts
+
+The milestone. By the end of Task 12 a bot spawned with `/tplus create` picks a target, turns to
+face it, closes the distance by jumping toward it, swims when it is in water, and hits it when it is
+in range. Everything the bot does to *terrain* — mining, towering, clutching — is Phases 5 to 7.
+
+That split works because `tickBot`'s terrain branches all funnel into `preBreak`, and each of them
+returns a boolean meaning "handled, stop here". Task 12 lands the flow with those branches absent
+rather than stubbed, and each later task inserts its branch in upstream's position. The order of the
+checks is load-bearing and is written out in Task 12 so later tasks have somewhere exact to insert.
 
 ## Task 10: `TargetGoal` and `Targeting`
 
@@ -4265,8 +4274,11 @@ public final class BlockRules {
 }
 ```
 
-Cross-check the block names against the patched sources before running — `SHORT_GRASS` was `GRASS`
-before 1.20.3 and upstream lists both spellings' worth of entries:
+The test file needs `net.minecraft.world.item.DyeColor` and
+`net.minecraft.world.level.block.WeatheringCopper` for the variant families — the weather enum is
+the nested `WeatheringCopper.WeatherState` with values UNAFFECTED, EXPOSED, WEATHERED, OXIDIZED, and
+the accessor on both collection types is `pick`, not `get` (correction 5). Cross-check the block names against the patched sources before running —
+`SHORT_GRASS` was `GRASS` before 1.20.3 and upstream lists both spellings' worth of entries:
 
 ```bash
 grep -nE "public static final Block (SHORT_GRASS|TALL_GRASS|KELP_PLANT|SUNFLOWER|SOUL_FIRE) =" /tmp/mcsrc/net/minecraft/world/level/block/Blocks.java
@@ -4794,7 +4806,11 @@ public final class Navigation {
      *             swimming pose. With no water below, the impulse is flattened and scaled to 0.7.
      */
     public void swim(Bot bot, Vec3 target, LivingEntity livingTarget, boolean anim) {
-        bot.stand();
+        // Upstream opened with setSneaking(false) and nothing else. Calling bot.stand() here
+        // would be wrong: stand() also clears the swim flag, so the non-anim branch below would
+        // silently stop a swimming bot from swimming. setShiftKeyDown is vanilla's public
+        // equivalent of Bukkit's setSneaking and touches only the one flag.
+        bot.setShiftKeyDown(false);
 
         Vec3 at = bot.position();
         MotionVec vector = MotionVec.of(target.subtract(at));
@@ -4830,10 +4846,11 @@ public final class Navigation {
 }
 ```
 
-`swim` starts with `bot.stand()` because upstream opened with
-`((Player) playerNPC).setSneaking(false)` — the same thing, since `stand` also clears the swim flag
-that the `anim` branch is about to set. Verify that ordering against the original before moving on;
-if it matters, split `stand` into its two flag writes rather than reordering the method.
+`swim` un-sneaks with `setShiftKeyDown(false)` rather than `stand()`, and the difference matters:
+`stand()` also clears the swim flag and sets the standing pose, so in the `anim == false` branch —
+water at the bot's waist but not below it — a bot that was already swimming would stop. Upstream
+called Bukkit's `setSneaking(false)`, which touches one flag. This was `stand()` in an earlier draft
+of the plan.
 
 Add `BotMath.floorY(Vec3)` alongside the other helpers — upstream compared `getBlockY()` values, so
 this is `Mth.floor(vec.y)`:
@@ -5024,13 +5041,15 @@ public final class LegacyAgent extends Agent {
                 withinTargetXZ = true;
             }
 
+            // Declared here to match upstream's order, and deliberately not read until Task 19
+            // adds checkDown. javac does not warn on an unused local, but a reviewer will ask:
+            // it is here so the three later insertions do not have to reorder this block.
             boolean bothXZ = withinTargetXZ || sameXZ;
 
             // Tasks 16, 19 and 21 insert their checks here, in this order:
             //   checkAt, checkFenceAndGates, checkObstacles, checkDown,
             //   checkUp (only when withinTargetXZ || sameXZ), checkSide (only when bothXZ).
             // Each returns true for "handled", and tickBot returns immediately on true.
-            // `bothXZ` is unused until Task 19; leaving it computed keeps the diff honest.
 
             switch (sideResult) {
                 case 1:
@@ -5360,7 +5379,8 @@ Append to `BlockRuleTests`:
 
         // Upstream excluded GLASS_PANE and IRON_BARS by name, but every *stained* pane matched
         // Bukkit's Fence data class and stayed in. Bots treat these as fences. See the task.
-        helper.assertTrue(BlockRules.isFence(Blocks.WHITE_STAINED_GLASS_PANE.defaultBlockState()),
+        helper.assertTrue(BlockRules.isFence(Blocks.STAINED_GLASS_PANE.pick(DyeColor.WHITE)
+                        .defaultBlockState()),
                 "a stained pane was in upstream's FENCE set");
         helper.assertFalse(BlockRules.isFence(Blocks.GLASS_PANE.defaultBlockState()),
                 "plain glass pane was excluded by name");
@@ -5433,9 +5453,11 @@ Append to `BlockRuleTests`:
 
         helper.assertFalse(BlockRules.isObstacle(Blocks.STONE.defaultBlockState()), "stone is not an obstacle");
 
-        // Upstream listed Material.CHAIN. That constant was renamed, which is the single
-        // clearest argument for tags over hand-written lists — see spec §4.2.
-        helper.assertTrue(BlockRules.isObstacle(Blocks.CHAIN.defaultBlockState()), "chain");
+        // Upstream listed Material.CHAIN; the block is Blocks.IRON_CHAIN in 26.2, which is the
+        // single clearest argument for tags over hand-written lists — see spec §4.2.
+        helper.assertTrue(BlockRules.isObstacle(Blocks.IRON_CHAIN.defaultBlockState()), "chain");
+        helper.assertTrue(BlockRules.isObstacle(Blocks.LIGHTNING_ROD
+                .pick(WeatheringCopper.WeatherState.UNAFFECTED).defaultBlockState()), "lightning rod");
 
         helper.succeed();
     }
@@ -5449,7 +5471,8 @@ Append to `BlockRuleTests`:
         helper.assertTrue(BlockRules.canStandOn(Blocks.LADDER.defaultBlockState()), "ladder");
         helper.assertTrue(BlockRules.canStandOn(Blocks.SCAFFOLDING.defaultBlockState()), "scaffolding");
         helper.assertTrue(BlockRules.canStandOn(Blocks.LILY_PAD.defaultBlockState()), "lily pad");
-        helper.assertTrue(BlockRules.canStandOn(Blocks.WHITE_CARPET.defaultBlockState()), "carpet");
+        helper.assertTrue(BlockRules.canStandOn(Blocks.CARPET.pick(DyeColor.WHITE).defaultBlockState()),
+                "carpet");
         helper.assertTrue(BlockRules.canStandOn(Blocks.POTTED_CACTUS.defaultBlockState()), "potted plant");
         helper.assertTrue(BlockRules.canStandOn(Blocks.SKELETON_SKULL.defaultBlockState()), "skull");
         helper.assertTrue(BlockRules.canStandOn(Blocks.CANDLE.defaultBlockState()), "candle");
@@ -5558,9 +5581,9 @@ Append to `BlockRules`, and delete the "Partial" paragraph from its class javado
     /** Blocks that must be broken rather than walked through. Upstream's OBSTACLES set. */
     private static final Set<Block> OBSTACLE_BLOCKS = Set.of(
             Blocks.IRON_BARS,
-            Blocks.CHAIN,
+            // Not Blocks.CHAIN: correction 5. This is the rename spec §4.2 cites.
+            Blocks.IRON_CHAIN,
             Blocks.END_ROD,
-            Blocks.LIGHTNING_ROD,
             Blocks.COBWEB,
             Blocks.SWEET_BERRY_BUSH,
             Blocks.FLOWER_POT,
@@ -5654,8 +5677,11 @@ Append to `BlockRules`, and delete the "Partial" paragraph from its class javado
     }
 
     public static boolean isObstacle(BlockState state) {
+        // LightningRodBlock rather than a constant: rods are a weathering-copper family now,
+        // so there is no single Blocks.LIGHTNING_ROD to compare against (correction 5).
         return OBSTACLE_BLOCKS.contains(state.getBlock())
                 || state.is(BlockTags.FLOWER_POTS)
+                || state.getBlock() instanceof LightningRodBlock
                 || state.getBlock() instanceof IronBarsBlock;
     }
 
@@ -5706,7 +5732,7 @@ Append to `BlockRules`, and delete the "Partial" paragraph from its class javado
 ```
 
 Add imports: `net.minecraft.tags.BlockItemTags`, `net.minecraft.tags.BlockTags`,
-`net.minecraft.world.level.block.IronBarsBlock`,
+`net.minecraft.world.level.block.IronBarsBlock`, `net.minecraft.world.level.block.LightningRodBlock`,
 `net.minecraft.world.level.block.LeverBlock`, `net.minecraft.world.level.block.SkullBlock`,
 `net.minecraft.world.level.block.WallSkullBlock`.
 
@@ -5916,20 +5942,48 @@ Append to `BlockRuleTests`:
 
     @GameTest
     @EmptyTemplate(floor = true)
-    static void should_replace_distinguishes_landing_on_from_landing_in(ExtendedGameTestHelper helper) {
+    static void should_replace_takes_partial_height_blocks_only(ExtendedGameTestHelper helper) {
         BlockPos relative = new BlockPos(1, 1, 1);
         BlockPos pos = helper.absolutePos(relative);
+        double insideY = pos.getY() + 0.4;
 
         // shouldReplace answers "does the water go INTO this block, or on top of it?" — it is
-        // what decides between groundLoc and groundLoc.above() in onFallDamage. A snow layer is
-        // replaced in place; solid stone is built on top of.
-        helper.setBlock(relative, Blocks.SNOW);
-        helper.assertTrue(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY(), false),
-                "a snow layer is replaced in place");
+        // what decides between ground and ground.above() in onFallDamage. Upstream's list is
+        // partial-height shapes, NOT "non-solid blocks".
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM));
+        helper.assertTrue(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
+                "a bottom slab leaves the top half free, so water goes in");
 
         helper.setBlock(relative, Blocks.STONE);
-        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY(), false),
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
                 "stone is built on top of");
+
+        // A snow layer looks like the obvious candidate and is deliberately absent from
+        // upstream's list. An earlier draft of this plan asserted the opposite.
+        helper.setBlock(relative, Blocks.SNOW);
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
+                "a snow layer is NOT in upstream's replace list");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    static void should_replace_has_two_leading_gates(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        BlockPos pos = helper.absolutePos(relative);
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM));
+
+        // Gate one: the bot's own block Y must equal the block's, so a bot still well above the
+        // slab builds on top of it rather than into it.
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY() + 4, false),
+                "an entity four blocks up must not replace");
+
+        // Gate two: the Nether never replaces, because twisting vines need a surface to sit on.
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY() + 0.4, true),
+                "the Nether never replaces");
 
         helper.succeed();
     }
@@ -5992,6 +6046,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.IronBarsBlock;
+import net.minecraft.world.level.block.LightningRodBlock;
 import net.minecraft.world.level.block.SkullBlock;
 import net.minecraft.world.level.block.WallSkullBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -6000,6 +6055,7 @@ import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.state.properties.SlabType;
 
 import java.util.OptionalDouble;
+import java.util.Set;
 
 /**
  * Where a bot can put water, or twisting vines, to survive a fall.
@@ -6032,8 +6088,9 @@ public final class BlockPlacement {
         if (BlockRules.isSolid(state)) {
             boolean waterlogged = state.getValueOrElse(BlockStateProperties.WATERLOGGED, false);
 
-            // A vertical chain: water flows straight past it.
-            if (block == Blocks.CHAIN && !waterlogged
+            // A vertical chain: water flows straight past it. Blocks.IRON_CHAIN, not
+            // Blocks.CHAIN — correction 5.
+            if (block == Blocks.IRON_CHAIN && !waterlogged
                     && state.getValueOrElse(BlockStateProperties.AXIS, Direction.Axis.Y) == Direction.Axis.Y) {
                 return false;
             }
@@ -6068,7 +6125,9 @@ public final class BlockPlacement {
                 return false;
             }
 
-            if (block == Blocks.LIGHTNING_ROD && !waterlogged) {
+            // instanceof, not identity: lightning rods are a weathering-copper family in 26.2
+            // and there is no single Blocks.LIGHTNING_ROD constant (correction 5).
+            if (block instanceof LightningRodBlock && !waterlogged) {
                 Direction facing = state.getValueOrElse(BlockStateProperties.FACING, Direction.UP);
 
                 if (facing == Direction.UP || facing == Direction.DOWN) {
@@ -6096,8 +6155,13 @@ public final class BlockPlacement {
                 || STILL_HOLDS_WATER.contains(state.getBlock());
     }
 
-    /** Upstream's non-solid switch in {@code canPlaceWater}, as a set. */
-    private static final java.util.Set<Block> STILL_HOLDS_WATER = java.util.Set.of(
+    /**
+     * Upstream's non-solid switch in {@code canPlaceWater}, as a set.
+     *
+     * <p>Read by {@code canPlaceWater} only. {@code shouldReplace} has its own, different list —
+     * see {@link #REPLACEABLE_BY_WATER} and the note there.
+     */
+    private static final Set<Block> STILL_HOLDS_WATER = Set.of(
             Blocks.SNOW,
             Blocks.AZALEA, Blocks.FLOWERING_AZALEA,
             Blocks.CHORUS_FLOWER, Blocks.CHORUS_PLANT,
@@ -6117,11 +6181,7 @@ public final class BlockPlacement {
         BlockState state = level.getBlockState(pos);
 
         if (BlockRules.isSolid(state)) {
-            // Upstream enumerated every partial shape it had to reject — slabs, stairs, fences,
-            // panes, trapdoors, chains, rods, walls. All of them are asking whether the top
-            // face is a full square, which is what isFaceSturdy answers. Verified against the
-            // list before substituting; anything the two disagree on is a bug in the list.
-            return state.isFaceSturdy(level, pos, Direction.UP);
+            return vinesHoldOnSolid(state);
         }
 
         if (state.getBlock() == Blocks.SNOW) {
@@ -6137,6 +6197,92 @@ public final class BlockPlacement {
     }
 
     /**
+     * Upstream's rejection list for the solid branch of {@code canPlaceTwistingVines}.
+     *
+     * <p>Every entry is a shape that leaves the top of its block space unusable. The obvious
+     * compression is {@code state.isFaceSturdy(level, pos, Direction.UP)} — "is the top face a
+     * full square" — and it is **wrong**: it disagrees with upstream on farmland, honey blocks,
+     * leaves and the end portal frame, all of which are full cubes that upstream rejects anyway.
+     * Measured, not guessed; keep the list.
+     *
+     * <p>Where a tag is exactly equivalent to upstream's test it is used, because a tag cannot go
+     * stale. The rest is upstream's 35-entry switch, verbatim.
+     */
+    private static boolean vinesHoldOnSolid(BlockState state) {
+        Block block = state.getBlock();
+
+        if (state.is(BlockTags.LEAVES) || isCoral(state)
+                || block instanceof IronBarsBlock
+                || state.is(BlockTags.FENCES) || state.is(BlockTags.WALLS)
+                || state.is(BlockTags.BANNERS)
+                || state.is(BlockTags.BEDS)
+                || state.is(BlockTags.CANDLE_CAKES)
+                || state.is(BlockTags.DOORS)
+                || state.is(BlockTags.FENCE_GATES)) {
+            return false;
+        }
+
+        if (state.is(BlockTags.SLABS)
+                && state.getValueOrElse(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM) == SlabType.BOTTOM) {
+            return false;
+        }
+
+        if (state.is(BlockTags.STAIRS)
+                && state.getValueOrElse(BlockStateProperties.HALF, Half.BOTTOM) == Half.BOTTOM) {
+            return false;
+        }
+
+        if (state.is(BlockTags.TRAPDOORS)) {
+            boolean bottom = state.getValueOrElse(BlockStateProperties.HALF, Half.BOTTOM) == Half.BOTTOM;
+
+            if (bottom || state.getValueOrElse(BlockStateProperties.OPEN, false)) {
+                return false;
+            }
+        }
+
+        // Pistons by identity rather than class: the base and head block classes were renamed,
+        // and the three constants are stable. A head must point up; an extended base must point
+        // down.
+        if (block == Blocks.PISTON_HEAD
+                && state.getValueOrElse(BlockStateProperties.FACING, Direction.UP) != Direction.UP) {
+            return false;
+        }
+
+        if ((block == Blocks.PISTON || block == Blocks.STICKY_PISTON)
+                && state.getValueOrElse(BlockStateProperties.EXTENDED, false)
+                && state.getValueOrElse(BlockStateProperties.FACING, Direction.DOWN) != Direction.DOWN) {
+            return false;
+        }
+
+        return !NO_VINE_SURFACE.contains(block) && !(block instanceof LightningRodBlock);
+    }
+
+    /** Upstream's 35-entry switch in {@code canPlaceTwistingVines}, minus the tagged families. */
+    private static final Set<Block> NO_VINE_SURFACE = Set.of(
+            Blocks.POINTED_DRIPSTONE,
+            Blocks.SMALL_AMETHYST_BUD, Blocks.MEDIUM_AMETHYST_BUD, Blocks.LARGE_AMETHYST_BUD,
+            Blocks.AMETHYST_CLUSTER,
+            Blocks.BAMBOO, Blocks.CACTUS,
+            Blocks.DRAGON_EGG, Blocks.TURTLE_EGG,
+            Blocks.IRON_CHAIN, Blocks.IRON_BARS,
+            Blocks.LANTERN, Blocks.SOUL_LANTERN,
+            Blocks.ANVIL, Blocks.BREWING_STAND,
+            Blocks.CHEST, Blocks.ENDER_CHEST, Blocks.TRAPPED_CHEST,
+            Blocks.ENCHANTING_TABLE, Blocks.GRINDSTONE, Blocks.LECTERN, Blocks.STONECUTTER,
+            Blocks.BELL, Blocks.CAKE,
+            Blocks.CAMPFIRE, Blocks.SOUL_CAMPFIRE,
+            Blocks.CAULDRON, Blocks.COMPOSTER, Blocks.CONDUIT,
+            Blocks.END_PORTAL_FRAME, Blocks.FARMLAND, Blocks.DAYLIGHT_DETECTOR,
+            Blocks.HONEY_BLOCK, Blocks.HOPPER,
+            Blocks.SCULK_SENSOR, Blocks.SCULK_SHRIEKER);
+
+    /** Coral in any of upstream's three name forms: coral, coral fan, coral wall fan. */
+    private static boolean isCoral(BlockState state) {
+        return state.is(BlockTags.CORALS) || state.is(BlockTags.CORAL_PLANTS)
+                || state.is(BlockTags.WALL_CORALS);
+    }
+
+    /**
      * Whether the clutch block is placed *into* {@code pos} rather than on top of it.
      *
      * <p>Ported from {@code shouldReplace}. {@code onFallDamage} calls it to choose between
@@ -6144,25 +6290,66 @@ public final class BlockPlacement {
      * it is, a solid block is built on.
      */
     public static boolean shouldReplace(ServerLevel level, BlockPos pos, double entityY, boolean nether) {
-        BlockState state = level.getBlockState(pos);
-
-        if (state.isAir()) {
+        // Two leading gates, both upstream's, both easy to lose in a rewrite. The bot's own block
+        // Y must equal the block's, so this only ever replaces a block the bot is already inside;
+        // and nothing is ever replaced in the Nether, because twisting vines need a surface to
+        // sit on rather than a space to fill.
+        if ((int) entityY != pos.getY() || nether) {
             return false;
         }
 
-        if (BlockRules.isSolid(state)) {
-            // A solid block is only replaced when the bot is already standing inside it — the
-            // same "inside the upper half" idea as the stair rule above.
-            return !nether && (int) entityY == pos.getY()
-                    && !state.isFaceSturdy(level, pos, Direction.UP);
+        BlockState state = level.getBlockState(pos);
+        Block block = state.getBlock();
+        boolean waterlogged = state.getValueOrElse(BlockStateProperties.WATERLOGGED, false);
+
+        if (isCoral(state)) {
+            return true;
         }
 
-        return state.is(BlockTags.WOOL_CARPETS)
-                || state.is(BlockTags.CANDLES)
-                || state.is(BlockTags.FLOWER_POTS)
-                || isHead(state)
-                || STILL_HOLDS_WATER.contains(state.getBlock());
+        if (state.is(BlockTags.SLABS)
+                && state.getValueOrElse(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM) == SlabType.BOTTOM) {
+            return true;
+        }
+
+        // Either half, unlike canPlaceWater's stair rule, which distinguishes them. Upstream
+        // tested only waterlogging here; the two methods disagree on purpose.
+        if (state.is(BlockTags.STAIRS) && !waterlogged) {
+            return true;
+        }
+
+        if (block == Blocks.IRON_CHAIN && !waterlogged) {
+            return true;
+        }
+
+        if (state.is(BlockTags.CANDLES)) {
+            return true;
+        }
+
+        if (state.is(BlockTags.TRAPDOORS) && !waterlogged) {
+            return true;
+        }
+
+        return REPLACEABLE_BY_WATER.contains(block) || block instanceof LightningRodBlock;
     }
+
+    /**
+     * Upstream's 17-entry switch in {@code shouldReplace}.
+     *
+     * <p>Blocks that leave enough of their block space empty for water to occupy it. The set is
+     * emphatically **not** "non-solid blocks": carpets, snow layers, flower pots and heads are all
+     * absent, and full-height stairs are present. An earlier draft of this plan reused
+     * {@code STILL_HOLDS_WATER} here and got every one of those wrong.
+     */
+    private static final Set<Block> REPLACEABLE_BY_WATER = Set.of(
+            Blocks.POINTED_DRIPSTONE,
+            Blocks.SMALL_AMETHYST_BUD, Blocks.MEDIUM_AMETHYST_BUD, Blocks.LARGE_AMETHYST_BUD,
+            Blocks.AMETHYST_CLUSTER,
+            Blocks.SEA_PICKLE,
+            Blocks.LANTERN, Blocks.SOUL_LANTERN,
+            Blocks.CHEST, Blocks.ENDER_CHEST, Blocks.TRAPPED_CHEST,
+            Blocks.CAMPFIRE, Blocks.SOUL_CAMPFIRE,
+            Blocks.CONDUIT,
+            Blocks.SCULK_SENSOR, Blocks.SCULK_SHRIEKER);
 
     /** A head or skull, wall-mounted or not. No tag covers these. */
     private static boolean isHead(BlockState state) {
@@ -6172,16 +6359,19 @@ public final class BlockPlacement {
 }
 ```
 
-**`shouldReplace` needs the closest reading of anything in this plan.** Upstream's version is 42
-lines of nested conditions over `entityYPos` and `nether`, and the translation above compresses it.
-Do not accept it on trust: read the original line by line and check each branch against the tests in
-Step 1, adding a test for any branch the six above do not reach. If the compression turns out to be
-wrong, write it out longhand — a faithful 42 lines beats a wrong 12.
+**Both of these were compressed in an earlier draft of this plan, and both compressions were
+wrong.** The record, because the same shortcuts will look tempting again:
 
-Same caution for the `isFaceSturdy` substitution in `canPlaceTwistingVines`. It replaces an explicit
-list of two dozen rejected shapes with the question that list was approximating. Verify by walking
-upstream's list and checking each entry's `isFaceSturdy` result; any disagreement is worth a comment
-naming it, and if there are several, keep upstream's list.
+- `shouldReplace` was written as "solid, and not face-sturdy". Upstream's real logic leads with two
+  gates — the bot's block Y must match the block's, and the Nether always returns false — and then
+  consults an explicit list of partial-height shapes. The draft omitted both gates, added carpets,
+  snow and flower pots that are **not** in upstream's list, and dropped the full-height stairs that
+  are.
+- `canPlaceTwistingVines`' solid branch was written as `isFaceSturdy(UP)`. That predicate disagrees
+  with upstream's list on farmland, honey blocks, leaves and the end portal frame.
+
+The versions above are the faithful translations. Read the originals alongside them anyway — but what
+needs checking now is transcription, not judgement.
 
 - [ ] **Step 4: Write `onFallDamage`**
 
@@ -7023,7 +7213,7 @@ method so the id lands in `taskList` and `stopAllTasks` reaches it:
     }
 ```
 
-`later`, `cancel` and `random` are already public for this reason (Task 9); keep `repeating` public
+`later`, `cancel` and `random` are already public for this reason (Task 7); keep `repeating` public
 to match. A separate `AgentTasks` interface between classes that ship together would be ceremony.
 
 - [ ] **Step 6: Wire checks 10, 11 and 12 into `tickBot`**
@@ -7393,7 +7583,7 @@ block, stage)` — the bridge indirection spec §4.4 deletes.
             Blocks.COMMAND_BLOCK, Blocks.REPEATING_COMMAND_BLOCK, Blocks.CHAIN_COMMAND_BLOCK);
 ```
 
-`Agent.random()` and `Agent.cancel(int)` already exist — Task 9 added them alongside `later`.
+`Agent.random()` and `Agent.cancel(int)` already exist — Task 7 added them alongside `later`.
 
 **The `int[] taskId` trick needs a comment in the code**, because it looks like a mistake. The task
 needs its own id to look up its progress, and the id is only known after `repeating` returns — a
@@ -8265,12 +8455,21 @@ public final class SurroundingScanTests {
         registry.setAgent(agent);
 
         BlockPos origin = new BlockPos(7, 1, 7);
-        Bot bot = spawn(helper, registry, origin, yawFor(Direction.NORTH));
+
+        // The bot must STRADDLE a block boundary for this path to be reachable at all, and that
+        // is not obvious. footprintOffset only fires when the fence is one whole block away on
+        // one axis, and the corners it scans come from the bot's own 0.6-wide bounding box — a
+        // bot centred in its block has all four corners inside that one block, so no candidate
+        // is ever one block away. Spawning on the x boundary makes the box span two columns.
+        // An earlier draft of this plan spawned centred and the test could not pass.
+        Vec3 straddling = helper.absoluteVec(new Vec3(8.0, 1, 7.5));
+        Bot bot = BotFactory.spawn(registry, helper.getLevel(), straddling,
+                yawFor(Direction.NORTH), 0f, BotGameProfiles.create("ScanBot", null), false);
+        bot.setGameMode(GameType.SURVIVAL);
 
         // The footprint scan runs BEFORE the directional switch, so a fence beside the bot is
-        // found even though there is also a wall in front of it. It only reports a fence that
-        // is exactly one block away on a single axis, and only when the bot is facing across
-        // that axis — a bot facing north finds a fence to its east or west.
+        // found even though there is also a wall in front of it. It only reports a fence when
+        // the bot is facing across the fence's axis — facing north finds one east or west.
         helper.setBlock(origin.east(), Blocks.OAK_FENCE);
         helper.setBlock(origin.above().north(), Blocks.STONE);
 
@@ -8453,6 +8652,11 @@ public final class SurroundingScan {
      * duplicate the directional one.
      */
     private @Nullable ScanOffset scanFootprint(Bot bot, ServerLevel level, Direction dir) {
+        // Reachability note, because it is easy to think this scan covers the bot's neighbours:
+        // it does not. The corners come from a 0.6-wide bounding box, so a bot centred in its
+        // block yields four candidates all inside that one block, and footprintOffset's
+        // one-block displacement test can never match. This path only fires for a bot straddling
+        // a block boundary — which, mid-jump between two blocks, is most of the time.
         AABB box = bot.getBotBoundingBox();
         Vec3 pos = bot.position();
 
@@ -9569,7 +9773,10 @@ Seven arguments, so it takes the coordinates as two block positions plus three w
         BlockPos from = BlockPosArgument.getBlockPos(ctx, "from");
         BlockPos to = BlockPosArgument.getBlockPos(ctx, "to");
 
-        AABB region = new AABB(from).minmax(new AABB(to));
+        // encapsulatingFullBlocks covers both blocks entirely, which is what an operator
+        // selecting two corners means. new AABB(from).minmax(new AABB(to)) would work too but
+        // reads worse.
+        AABB region = AABB.encapsulatingFullBlocks(from, to);
         agent.targeting().setRegion(region, weightX, weightY, weightZ);
 
         ctx.getSource().sendSuccess(() -> Component.literal(
@@ -9579,12 +9786,8 @@ Seven arguments, so it takes the coordinates as two block positions plus three w
     }
 ```
 
-Verify `AABB.minmax` and the `AABB(BlockPos)` constructor exist, or build the box from the six
-coordinates directly:
-
-```bash
-grep -nE "public AABB\(BlockPos|public AABB minmax" /tmp/mcsrc/net/minecraft/world/phys/AABB.java
-```
+`AABB.encapsulatingFullBlocks(BlockPos, BlockPos)` is verified present in 26.2, as are
+`new AABB(BlockPos)` and `AABB.minmax` if you prefer those.
 
 - [ ] **Step 4: Run everything**
 
@@ -9655,8 +9858,8 @@ the commit message. The sanctioned ones, for reference:
    comparison (Task 11).
 3. `SurroundingScan`'s four directional arms are one parameterised body (Task 20).
 4. `tryPreMLG`'s comparator has the mirrored second arm upstream's comment intended (Task 23).
-5. `AgentState.forget` clears per-bot entries that upstream leaked (Task 9).
-6. `onBotKilledByPlayer` runs on the server thread instead of async (Task 9).
+5. `AgentState.forget` clears per-bot entries that upstream leaked (Task 7).
+6. `onBotKilledByPlayer` runs on the server thread instead of async (Task 7).
 7. `BlockRules.INSTANT_BREAK` uses block constants where upstream named items (Task 13).
 8. `Mining.downMine`'s nudge — pending the Bukkit `getLocation` check in Task 18 Step 1.
 9. `GroundCheck` empty-shape fallback returns a flat box rather than null (Task 13).
@@ -9689,13 +9892,13 @@ upstream's subcommands are still missing, and two of them leave real state unrea
 
 | Upstream | Status before this task |
 |---|---|
-| `settings mobtarget` | **Unreachable.** Task 7 added `BotRegistry.mobTarget` and the `LivingChangeTargetEvent` listener that reads it, with nothing to toggle it |
+| `settings mobtarget` | **Unreachable.** Task 8 added `BotRegistry.mobTarget` and the `LivingChangeTargetEvent` listener that reads it, with nothing to toggle it |
 | `settings playertarget` | **Unreachable.** Task 4 added `Bot.setTargetPlayer` and Task 10's `PLAYER` goal reads it, with nothing to set it |
 | `give <item>` | Per-bot `/tplus bot <name> hold` exists (Task 5); the bulk form does not |
 | `armor <tier>` | Missing entirely |
 | `info <bot>` | Missing entirely |
 
-`settings addplayerlist` is deliberately **not** ported as a sticky global. Task 8 exposes the same
+`settings addplayerlist` is deliberately **not** ported as a sticky global. Task 9 exposes the same
 capability as `/tplus create <name> <count> playerlist`, which is per-invocation. Brigadier makes
 that the natural shape, and a hidden global that changes what `create` does is worse for an
 operator than an explicit argument. Recorded as a shape change, not an omission.
@@ -9942,7 +10145,7 @@ it has to become `Map.ofEntries`.
 - [ ] **Step 4: Verify by hand**
 
 There is nothing worth a GameTest here: every handler is a registry loop plus a message, and the
-state each one writes is already covered — `mobTarget` by Task 7's listener, `targetPlayer` by Task
+state each one writes is already covered — `mobTarget` by Task 8's listener, `targetPlayer` by Task
 10's `PLAYER` goal, `defaultItem` by Task 4's attack tests. What needs checking is that the tree
 parses and the arguments resolve, which only a real server shows.
 
@@ -9976,6 +10179,9 @@ git commit -m "feat: complete the command surface (mobtarget, playertarget, give
 ---
 ## Definition of done
 
+- [ ] Every task's commit compiles. No task in this plan ends on a red build: each one's only
+      expected failure is the TDD red step, which is always a missing symbol the same task then
+      adds.
 - [ ] `./gradlew build` succeeds with no warnings introduced by this plan.
 - [ ] Every unit test passes.
 - [ ] `./gradlew runGameTestServer` reports all required tests passed and exits 0.
