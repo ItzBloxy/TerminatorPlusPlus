@@ -1,12 +1,26 @@
-# TerminatorPlus — NeoForge port
+# TerminatorPlus++
 
 A port of the TerminatorPlus Bukkit/Paper plugin to a **server-side NeoForge mod** for Minecraft
 26.2. Bots are `ServerPlayer`s driven by a fake connection; they hunt a target, mine through walls,
 tower, clutch out of falls and fight back.
 
+Upstream paused on Paper 1.21.1. This is not positioned as a successor — it is another option for
+people who want a version that runs on a current Minecraft. `README.md` is the user-facing side of
+that; this file is the working guide.
+
+**The name is only on the outside.** `mod_id` is still `tplus`, the package is still
+`net.nuggetmc.tplus`, the command is still `/tplus` and the jar is still `tplus-<version>.jar`.
+Renaming any of those means touching the access transformer, the gametest namespace, every import
+and every operator's muscle memory, for no functional gain — so it has not been done, and
+`mod_name` in `gradle.properties` carries the new name alone.
+
 **Fidelity is the point.** Method bodies are translated, not redesigned. Where upstream is odd, the
 port is odd in the same way and says so in a comment. Every deliberate divergence is in the
 deviation register (see *Docs* below) — if you change behaviour, add an entry.
+
+That constraint is about *translation*, not about the project. New behaviour upstream never had is
+welcome — Plan D added three such things — but it is designed deliberately, registered, and kept
+distinguishable from a translation that drifted.
 
 ## Branches
 
@@ -29,8 +43,8 @@ git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/
 ## Commands
 
 ```bash
-./gradlew build              # compile + 84 unit tests
-./gradlew runGameTestServer  # 132 GameTests, headless, ~10s
+./gradlew build              # compile + 98 unit tests
+./gradlew runGameTestServer  # 143 GameTests, headless, ~10s
 ./gradlew runServer          # dev server, RCON on 25575 (password in run/server.properties)
 ./gradlew runClient          # dev client — connect to localhost
 ./gradlew jar                # the production jar, build/libs/tplus-*.jar
@@ -70,6 +84,10 @@ Empirically: `runServer` found a fatal `ConfigSync` crash that 51 GameTests pass
 manual client session found **four** bugs invisible to 132 GameTests *and* to RCON — bots spawning
 in CREATIVE (immune to arrows), entity packets sent before player info, unsigned skins that render
 nothing, and a missing skin-layer mask. Do not treat a green suite as "it works".
+
+Unit tests also cost seconds where GameTests cost ten, so it is worth **designing value types to be
+testable without a world**: `EnemyTarget.matches` takes an `EntityType` and a `UUID` rather than an
+`Entity` for exactly that reason, and the whole targeting rule is unit tested as a result.
 
 ## GameTest conventions
 
@@ -121,7 +139,12 @@ Renames and traps this port walked into:
 - `docs/superpowers/plans/…-b-agent.md` — Plan B, complete. **Its deviation register is the one
   every later plan extends.** Do not start a new list
 - `docs/superpowers/plans/…-c-environment.md` — Plan C, complete
+- `docs/superpowers/specs/…-loadouts-and-entity-targeting-design.md` — Plan D's spec. These are
+  features upstream never had, so it stands in where there is no `paper-original` to check against
+- `docs/superpowers/plans/…-d-loadouts-targeting.md` — Plan D, complete
 - `docs/backlog.md` — what is not built yet, and why
+- `README.md` — the user-facing description, install and full command reference. Keep it true; it
+  is the only document a stranger reads
 
 ## House style
 
