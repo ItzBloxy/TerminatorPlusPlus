@@ -164,6 +164,34 @@ public final class BotGameTests {
         helper.succeed();
     }
 
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("playerlist_bot_leaves_the_levels_player_list_too")
+    static void aPlayerListBotLeavesTheLevelsPlayerListToo(ExtendedGameTestHelper helper) {
+        // Two lists, not one. The playerlist spawn path calls level.addNewPlayer, which puts
+        // the bot in ServerLevel.players() as well as PlayerList.players. removeBot only
+        // touches the latter explicitly, and leaving a discarded ServerPlayer in the level's
+        // list would be a slow leak that nothing else in the suite would notice.
+        BotRegistry registry = new BotRegistry();
+        ServerLevel level = helper.getLevel();
+
+        Bot bot = BotFactory.spawn(registry, level,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
+                BotGameProfiles.create("LeakBot", null), true);
+
+        helper.assertTrue(level.players().contains(bot),
+                "addNewPlayer must put the bot in the level's player list");
+
+        bot.removeBot();
+
+        helper.assertFalse(level.players().contains(bot),
+                "removeBot must take it back out of the level's player list, not just the "
+                        + "server's");
+
+        registry.reset();
+        helper.succeed();
+    }
+
     @GameTest
     @EmptyTemplate(value = "5x6x5", floor = true)
     @TestHolder("bot_connection_has_a_netty_channel")

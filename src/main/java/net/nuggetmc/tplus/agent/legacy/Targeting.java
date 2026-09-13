@@ -66,7 +66,7 @@ public final class Targeting {
      * {@code getPlayers()} anyway and never needed excluding.
      */
     public void beginTick() {
-        botsInPlayerList = registry.bots().stream().filter(Bot::isInPlayerList).toList();
+        botsInPlayerList = registry.botsView().stream().filter(Bot::isInPlayerList).toList();
     }
 
     public TargetGoal getTargetType() {
@@ -179,7 +179,7 @@ public final class Targeting {
             }
 
             case NEAREST_BOT: {
-                for (Bot other : registry.bots()) {
+                for (Bot other : registry.botsView()) {
                     if (bot != other && validateCloserEntity(bot, other, pos, result)) {
                         result = other;
                     }
@@ -190,7 +190,7 @@ public final class Targeting {
             case NEAREST_BOT_DIFFER: {
                 String name = bot.getBotName();
 
-                for (Bot other : registry.bots()) {
+                for (Bot other : registry.botsView()) {
                     if (bot != other && !name.equals(other.getBotName())
                             && validateCloserEntity(bot, other, pos, result)) {
                         result = other;
@@ -202,7 +202,7 @@ public final class Targeting {
             case NEAREST_BOT_DIFFER_ALPHA: {
                 String name = NAME_PATTERN.matcher(bot.getBotName()).replaceAll("");
 
-                for (Bot other : registry.bots()) {
+                for (Bot other : registry.botsView()) {
                     if (bot != other
                             && !name.equals(NAME_PATTERN.matcher(other.getBotName()).replaceAll(""))
                             && validateCloserEntity(bot, other, pos, result)) {

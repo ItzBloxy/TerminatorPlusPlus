@@ -15,7 +15,18 @@ import net.nuggetmc.tplus.agent.legacy.TargetGoal;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.common.NeoForge;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.event.BotDeathEvent;
+import net.nuggetmc.tplus.event.TerminatorLocateTargetEvent;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * In-world tests for the agent.
@@ -243,6 +254,132 @@ public final class AgentTests {
 
     @GameTest(timeoutTicks = 400)
     @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bus_handler_can_veto_a_target")
+    static void a_bus_handler_can_veto_a_target(ExtendedGameTestHelper helper) {
+        // TerminatorLocateTargetEvent is the only extension point this port keeps on the
+        // NeoForge bus, and it is the one thing a third-party mod can use to steer bots. It
+        // had no coverage at all.
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot hunter = spawn(helper, registry, new BlockPos(1, 1, 7), "Hunter");
+        spawn(helper, registry, new BlockPos(12, 1, 7), "Quarry");
+
+        VetoHandler handler = new VetoHandler();
+        NeoForge.EVENT_BUS.register(handler);
+
+        try {
+            Vec3 start = hunter.position();
+            settle(registry, 5);
+            run(registry, 40);
+
+            helper.assertTrue(handler.seen > 0, "the event must actually be posted");
+            helper.assertTrue(hunter.position().distanceTo(start) < 1.0,
+                    "a cancelled event means no target, so the bot must not move");
+        } finally {
+            NeoForge.EVENT_BUS.unregister(handler);
+        }
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bus_handler_can_retarget_a_bot")
+    static void a_bus_handler_can_retarget_a_bot(ExtendedGameTestHelper helper) {
+        // Cancelling and retargeting are different: a handler that sets a target replaces the
+        // goal's choice, where cancelling means "no target this tick".
+        //
+        // The goal is NEAREST_HOSTILE and the arena has no hostiles, so the goal itself finds
+        // nothing and the event carries a null target — which is exactly the case the event's
+        // contract calls out, a handler supplying a target the goal would never have picked.
+        // NONE would NOT work here: it returns before the event is posted at all, which the
+        // next test pins.
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_HOSTILE);
+        Bot hunter = spawn(helper, registry, new BlockPos(1, 1, 7), "Hunter");
+        Bot quarry = spawn(helper, registry, new BlockPos(12, 1, 7), "Quarry");
+
+        RetargetHandler handler = new RetargetHandler(quarry);
+        NeoForge.EVENT_BUS.register(handler);
+
+        try {
+            double before = hunter.position().distanceTo(quarry.position());
+            settle(registry, 5);
+            run(registry, 60);
+            double after = hunter.position().distanceTo(quarry.position());
+
+            helper.assertTrue(after < before - 1.0,
+                    "the handler's target must be chased even though the goal found nothing; "
+                            + "was " + before + ", now " + after);
+        } finally {
+            NeoForge.EVENT_BUS.unregister(handler);
+        }
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("the_none_goal_does_not_post_the_locate_event")
+    static void the_none_goal_does_not_post_the_locate_event(ExtendedGameTestHelper helper) {
+        // Upstream's switch has `default: return null;` covering NONE, and that return happens
+        // BEFORE the event is constructed. So NONE is not "target nothing, then ask the bus" —
+        // it is "do not ask the bus at all", and a handler cannot revive a NONE-goal bot.
+        // Faithful, and surprising enough that an earlier draft of this very test assumed the
+        // opposite and failed.
+        BotRegistry registry = registryWithAgent(TargetGoal.NONE);
+        spawn(helper, registry, new BlockPos(1, 1, 7), "Hunter");
+        spawn(helper, registry, new BlockPos(12, 1, 7), "Quarry");
+
+        VetoHandler handler = new VetoHandler();
+        NeoForge.EVENT_BUS.register(handler);
+
+        try {
+            settle(registry, 5);
+            run(registry, 30);
+
+            helper.assertValueEqual(handler.seen, 0,
+                    "the NONE goal must not post TerminatorLocateTargetEvent at all");
+        } finally {
+            NeoForge.EVENT_BUS.unregister(handler);
+        }
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("drops_disabled_clears_the_drop_list")
+    static void drops_disabled_clears_the_drop_list(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NONE);
+        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3), "Dropper");
+
+        List<ItemEntity> drops = new ArrayList<>();
+        drops.add(new ItemEntity(helper.getLevel(), bot.getX(), bot.getY(), bot.getZ(),
+                new ItemStack(Items.DIAMOND)));
+
+        // drops defaults to false, which is upstream's Agent field default, so a bot drops
+        // nothing until /tplus drops true. The handler is what clears the staged collection.
+        helper.assertFalse(registry.agent().isDrops(), "drops must default to disabled");
+
+        registry.agent().onBotDeath(new BotDeathEvent(bot, helper.getLevel().damageSources().fall(), drops));
+        helper.assertTrue(drops.isEmpty(), "with drops disabled the list must be cleared");
+
+        registry.agent().setDrops(true);
+        drops.add(new ItemEntity(helper.getLevel(), bot.getX(), bot.getY(), bot.getZ(),
+                new ItemStack(Items.DIAMOND)));
+
+        registry.agent().onBotDeath(new BotDeathEvent(bot, helper.getLevel().damageSources().fall(), drops));
+        helper.assertValueEqual(drops.size(), 1, "with drops enabled the list must survive");
+
+        bot.removeBot();
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
     @TestHolder("a_bot_finds_a_real_player_through_the_player_list")
     static void a_bot_finds_a_real_player_through_the_player_list(ExtendedGameTestHelper helper) {
         // The other tests use NEAREST_BOT, which scans the registry. This one covers the
@@ -266,5 +403,34 @@ public final class AgentTests {
 
         registry.reset();
         helper.succeed();
+    }
+}
+
+/** Vetoes every target the goal picks, and counts the events it saw. */
+final class VetoHandler {
+
+    int seen;
+
+    @SubscribeEvent
+    public void onLocate(TerminatorLocateTargetEvent event) {
+        seen++;
+        event.setCanceled(true);
+    }
+}
+
+/** Replaces whatever the goal picked with a fixed entity. */
+final class RetargetHandler {
+
+    private final LivingEntity target;
+
+    RetargetHandler(LivingEntity target) {
+        this.target = target;
+    }
+
+    @SubscribeEvent
+    public void onLocate(TerminatorLocateTargetEvent event) {
+        if (event.getBot() != target) {
+            event.setTarget(target);
+        }
     }
 }

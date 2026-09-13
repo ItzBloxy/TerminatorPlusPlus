@@ -8,6 +8,7 @@ import net.nuggetmc.tplus.util.BotLog;
 import net.nuggetmc.tplus.util.TickScheduler;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -69,8 +70,30 @@ public final class BotRegistry {
         this.mobTarget = mobTarget;
     }
 
+    /**
+     * A snapshot of the live bots, safe to hold across anything.
+     *
+     * <p>Prefer {@link #botsView()} on a per-tick path: this copies.
+     */
     public Collection<Bot> bots() {
         return Set.copyOf(bots);
+    }
+
+    /**
+     * A live, read-only view of the bots.
+     *
+     * <p>Upstream's {@code fetch()} returned the backing set itself, and the agent's three
+     * bot-targeting goals call it once per bot per tick — so copying here is O(bots squared)
+     * allocations every tick, in a plugin whose whole point is spawning hundreds of them.
+     *
+     * <p>Iterating this without copying is safe: the backing set is a
+     * {@code ConcurrentHashMap} key set, whose iterator is weakly consistent and never throws
+     * {@code ConcurrentModificationException}. A caller that removes bots while looping still
+     * wants {@link #bots()} or an explicit {@code List.copyOf}, which is what {@link #tick()}
+     * and {@link #reset()} do.
+     */
+    public Collection<Bot> botsView() {
+        return Collections.unmodifiableSet(bots);
     }
 
     public int size() {

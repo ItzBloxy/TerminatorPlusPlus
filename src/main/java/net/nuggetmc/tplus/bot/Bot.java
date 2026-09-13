@@ -483,13 +483,25 @@ public class Bot extends ServerPlayer {
     }
 
     /**
-     * Whether the bot is blocking.
+     * Whether the bot is blocking. <b>Always false.</b>
      *
      * <p>Upstream delegated to vanilla {@code isBlocking()} rather than reading its own
-     * {@code blocking} flag, and the two can disagree: vanilla also requires the item to have
-     * been in use past its warmup. Delegating is what the Paper build did, so it is what this
-     * does; the private flag stays because the damage path reads it directly, the same way
-     * upstream's {@code hurt} did.
+     * {@code blocking} flag, and the two disagree — permanently. Vanilla's
+     * {@code getItemBlockingWith} requires {@code blockDelayTicks} to have elapsed since the
+     * item went into use, measured from {@code useItemRemaining}; that field is only
+     * decremented by {@code updateUsingItem}, which is only reached from
+     * {@code LivingEntity.tick()}, which never runs for a bot — {@code ServerPlayer.tick()}
+     * does not call it and {@code doTick()} calls only {@code detectEquipmentUpdates} and
+     * {@code baseTick}. So the elapsed count stays at zero and this never returns true.
+     *
+     * <p>That is upstream's behaviour too: its {@code doTick} was identical and its 1.21
+     * {@code isBlocking} had the same 5-tick warmup. The shield feature has never worked, in
+     * either codebase. Ported faithfully rather than fixed, because making it work means
+     * changing what a bot ticks, which changes far more than shields. A GameTest pins the dead
+     * state so nobody half-fixes it.
+     *
+     * <p>The private {@code blocking} flag is a different thing and does become true: the
+     * damage path reads it to play the block sound, exactly as upstream's {@code hurt} did.
      */
     public boolean isBotBlocking() {
         return isBlocking();

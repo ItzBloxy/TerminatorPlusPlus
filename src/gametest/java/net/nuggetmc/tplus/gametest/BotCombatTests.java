@@ -326,6 +326,33 @@ public final class BotCombatTests {
 
     @GameTest(timeoutTicks = 200)
     @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("the_shield_is_inert_because_bots_never_tick_item_use")
+    static void the_shield_is_inert_because_bots_never_tick_item_use(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+        warmUp(bot);
+
+        bot.setShield(true);
+        bot.block(40, 40);
+        warmUp(bot);
+
+        // Documented dead feature, faithful to upstream. isBlocking() needs blockDelayTicks to
+        // have elapsed since the item went into use, counted from useItemRemaining — which only
+        // updateUsingItem decrements, which only LivingEntity.tick() reaches, which never runs
+        // for a bot. Upstream's doTick was identical, so its shields never worked either.
+        //
+        // This asserts the broken state on purpose. If it ever starts failing, someone has
+        // changed what a bot ticks, and that has much wider consequences than shields.
+        helper.assertFalse(bot.isBotBlocking(),
+                "a bot cannot block: LivingEntity.tick never runs for it, so the shield's "
+                        + "warmup never elapses");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x5x5", floor = true)
     @TestHolder("removing_a_bot_forgets_its_agent_state")
     static void removing_a_bot_forgets_its_agent_state(ExtendedGameTestHelper helper) {
         BotRegistry registry = new BotRegistry();
