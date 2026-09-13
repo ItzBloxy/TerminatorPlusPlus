@@ -4,6 +4,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
 import net.neoforged.testframework.annotation.TestHolder;
@@ -73,6 +75,62 @@ public final class BotCombatTests {
         for (int i = 0; i < 70; i++) {
             bot.tick();
         }
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "9x5x9", floor = true)
+    @TestHolder("an_arrow_hurts_a_bot")
+    static void an_arrow_hurts_a_bot(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        // Deliberately NOT the spawn() helper, which sets SURVIVAL by hand. These are raw
+        // BotFactory.spawn bots, so this test fails if production spawning ever stops setting a
+        // game mode again: a CREATIVE bot carries abilities.invulnerable and arrows pass
+        // straight through it.
+        Bot shooter = BotFactory.spawn(registry, helper.getLevel(),
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(1, 1, 4))), 0f, 0f,
+                BotGameProfiles.create("Archer", null), false);
+        Bot victim = BotFactory.spawn(registry, helper.getLevel(),
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(6, 1, 4))), 0f, 0f,
+                BotGameProfiles.create("Target", null), false);
+
+        // Drain the 60-tick spawn invulnerability every fresh ServerPlayer carries, or nothing
+        // can hurt anything and the test proves only that.
+        for (int i = 0; i < 70; i++) {
+            shooter.tick();
+            victim.tick();
+        }
+
+        float before = victim.getHealth();
+
+        // Ownerless, like a /summon arrow: isolates the projectile path from anything the
+        // shooter contributes.
+        net.minecraft.world.entity.projectile.arrow.Arrow arrow =
+                new net.minecraft.world.entity.projectile.arrow.Arrow(helper.getLevel(),
+                        shooter.getEyePosition().x, shooter.getEyePosition().y,
+                        shooter.getEyePosition().z, new ItemStack(Items.ARROW), null);
+
+        Vec3 from = shooter.getEyePosition();
+        Vec3 to = victim.position().add(0, 1, 0);
+        Vec3 aim = to.subtract(from);
+
+        arrow.snapTo(from.x, from.y, from.z, 0f, 0f);
+        arrow.shoot(aim.x, aim.y, aim.z, 3.0f, 0f);
+        helper.getLevel().addFreshEntity(arrow);
+
+        for (int i = 0; i < 20 && victim.getHealth() >= before; i++) {
+            arrow.tick();
+            victim.tick();
+        }
+
+        helper.assertTrue(victim.getHealth() < before,
+                "an arrow must hurt a bot; health stayed at " + victim.getHealth()
+                        + ", arrow at " + arrow.position() + " alive=" + arrow.isAlive()
+                        + ", victim pickable=" + victim.isPickable()
+                        + " hittable=" + victim.canBeHitByProjectile()
+                        + " gameMode=" + victim.gameMode() + " spectator=" + victim.isSpectator());
+
+        registry.reset();
+        helper.succeed();
     }
 
     @GameTest(timeoutTicks = 200)
@@ -406,6 +464,7 @@ final class AlwaysBlockingAgent extends Agent {
     public void onPlayerDamage(BotDamageByPlayerEvent event) {
         event.setCancelled(true);
     }
+
 }
 
 /** Halves every player hit, to prove setDamage is read back. */
@@ -423,4 +482,5 @@ final class HalvingAgent extends Agent {
     public void onPlayerDamage(BotDamageByPlayerEvent event) {
         event.setDamage(event.getDamage() / 2f);
     }
+
 }

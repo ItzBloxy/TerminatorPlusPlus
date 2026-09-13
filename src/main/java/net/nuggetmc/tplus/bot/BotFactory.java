@@ -14,6 +14,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -48,6 +49,19 @@ public final class BotFactory {
         MinecraftServer server = level.getServer();
 
         Bot bot = new Bot(server, level, profile);
+
+        // Survival, explicitly. ServerPlayer's constructor gives a new player whatever the host
+        // defaults to, and on a GameTest server that is CREATIVE -- which sets
+        // abilities.invulnerable and makes the bot immune to arrows, fire, fall damage and
+        // everything else that is not a direct hurtServer call. Melee still works, because the
+        // attacker names the entity rather than hitting a hitbox, which is why this survived
+        // three plans: every test papered over it with a setGameMode call of its own.
+        //
+        // It is also what the goals assume. PlayerUtils.isInvincible treats anything but
+        // SURVIVAL and ADVENTURE as invincible, so a CREATIVE bot is skipped by the vulnerable
+        // player goal as well.
+        bot.setGameMode(GameType.SURVIVAL);
+
         bot.setPos(pos.x, pos.y, pos.z);
         bot.setYRot(yaw);
         bot.setXRot(pitch);
