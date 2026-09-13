@@ -1,4 +1,4 @@
-# TerminatorPlus++
+# Terminator++
 
 A port of the TerminatorPlus Bukkit/Paper plugin to a **server-side NeoForge mod** for Minecraft
 26.2. Bots are `ServerPlayer`s driven by a fake connection; they hunt a target, mine through walls,

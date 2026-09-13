@@ -1,6 +1,6 @@
 <div align="center">
 
-# TerminatorPlus++
+# Terminator++
 
 **Server-side player bots for Minecraft 26.2, as a NeoForge mod.**
 
