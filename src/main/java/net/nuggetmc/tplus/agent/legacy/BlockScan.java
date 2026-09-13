@@ -1,17 +1,28 @@
 package net.nuggetmc.tplus.agent.legacy;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.agent.AgentState;
 import net.nuggetmc.tplus.bot.Bot;
+import net.nuggetmc.tplus.motion.BotMath;
+import net.nuggetmc.tplus.util.BotUtils;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.OptionalDouble;
+import java.util.Set;
 
 /**
  * Placing blocks: towering, and the two clutch routines.
@@ -19,7 +30,8 @@ import java.util.List;
  * <p>Ported from {@code LegacyBlockCheck}, which was a real collaborator of {@code LegacyAgent}
  * constructed with {@code (LegacyAgent, Plugin)} and held 8 of the 27 {@code runTaskLater} sites.
  *
- * <p><b>Partial.</b> {@code tryPreMLG} and {@code clutch} land in Task 23.
+ * <p>{@code placeBlock} is the tower step; {@code tryPreMLG} and {@code clutch} are the two
+ * placements that make these bots hard to kill.
  */
 public final class BlockScan {
 
@@ -148,6 +160,186 @@ public final class BlockScan {
 
     private static void placeSound(ServerLevel level, BlockPos pos) {
         level.playSound(null, pos, SoundEvents.STONE_PLACE, SoundSource.BLOCKS, 1f, 1f);
+    }
+
+    /**
+     * Places cobblestone under a falling bot, before it needs a water bucket.
+     *
+     * <p>Ported from {@code tryPreMLG}. Three gates before anything happens: the bot must be
+     * airborne, falling faster than -0.8, and have fewer than eight no-fall ticks left. Then it
+     * tries three blocks down, and failing that two.
+     *
+     * <p>Upstream's return value is {@code false} on every path — including the one that places
+     * a block — and its only caller ignored it. Void here; nothing ever read it.
+     */
+    public void tryPreMLG(Bot bot, Vec3 pos) {
+        if (bot.isBotOnGround() || bot.getVelocity().getY() >= -0.8 || bot.getNoFallTicks() > 7) {
+            return;
+        }
+
+        if (tryPreMLG(bot, pos, 3)) {
+            return;
+        }
+
+        tryPreMLG(bot, pos, 2);
+    }
+
+    /**
+     * Looks {@code blocksBelow} down from each corner of the bot's footprint.
+     *
+     * <p>The rule, in upstream's words rearranged: every block between the bot and the candidate
+     * must be pass-through, and the candidate must be something the bot would land on but
+     * <b>cannot</b> place water or vines on — because if it could, {@code onFallDamage} will
+     * handle it later and a cobblestone block now would be wasted.
+     *
+     * @return whether a block was placed. Always false, as upstream's did; the caller ignores it
+     *         and the {@code tryPreMLG(bot, pos, 3)} attempt above therefore always falls through
+     *         to the two-block one. Faithfully pointless.
+     */
+    private boolean tryPreMLG(Bot bot, Vec3 pos, int blocksBelow) {
+        ServerLevel level = (ServerLevel) bot.level();
+        AABB box = bot.getBotBoundingBox();
+        boolean nether = bot.isNether();
+
+        double[] xs = {box.minX, box.maxX - 0.01};
+        double[] zs = {box.minZ, box.maxZ - 0.01};
+
+        // LinkedHashSet where upstream had a HashSet: the sort below has ties, and an unordered
+        // set makes which of two equally good candidates wins depend on hash order.
+        Set<BlockPos> candidates = new LinkedHashSet<>();
+
+        for (double x : xs) {
+            for (double z : zs) {
+                int baseY = BotMath.floorY(pos);
+                int floorX = (int) Math.floor(x);
+                int floorZ = (int) Math.floor(z);
+
+                // Everything on the way down must be pass-through. Upstream returns from the
+                // whole method on the first blocked corner rather than skipping that corner.
+                for (int i = 1; i < blocksBelow; i++) {
+                    BlockState between = level.getBlockState(new BlockPos(floorX, baseY - i, floorZ));
+
+                    if (BlockRules.isSolid(between) || BlockRules.canStandOn(between)) {
+                        return false;
+                    }
+                }
+
+                candidates.add(new BlockPos(floorX, baseY - blocksBelow, floorZ));
+            }
+        }
+
+        // Keep only candidates that are landable AND unplaceable.
+        candidates.removeIf(candidate -> {
+            boolean placeable = nether
+                    ? BlockPlacement.canPlaceTwistingVines(level, candidate)
+                    : BlockPlacement.canPlaceWater(level, candidate, OptionalDouble.empty());
+
+            BlockState state = level.getBlockState(candidate);
+            return placeable || (!BlockRules.isSolid(state) && !BlockRules.canStandOn(state));
+        });
+
+        if (candidates.isEmpty()) {
+            return false;
+        }
+
+        List<BlockPos> sorted = new ArrayList<>(candidates);
+
+        // Clear air above first, then nearest horizontally. Upstream's second arm reads
+        // `if (!bAir && aAir) return 1`, which is its FIRST arm's condition rather than the
+        // mirror of it -- so it is unreachable, and the comparator is not antisymmetric.
+        // List.sort is entitled to throw for that. This writes the mirror the comment intended;
+        // it is a deviation, and it is in the register.
+        sorted.sort((a, b) -> {
+            boolean aClear = level.getBlockState(a.above()).isAir();
+            boolean bClear = level.getBlockState(b.above()).isAir();
+
+            if (aClear && !bClear) {
+                return -1;
+            }
+
+            if (bClear && !aClear) {
+                return 1;
+            }
+
+            return Double.compare(BotUtils.getHorizSqDist(a, pos), BotUtils.getHorizSqDist(b, pos));
+        });
+
+        BlockPos faceTarget = sorted.get(0);
+        BlockPos place = faceTarget.above();
+
+        bot.faceLocation(Vec3.atCenterOf(faceTarget));
+        bot.look(Direction.DOWN);
+        agent.later(1, () -> bot.faceLocation(Vec3.atCenterOf(faceTarget)));
+
+        bot.punch();
+        placeSound(level, place);
+        bot.setItem(new ItemStack(Items.COBBLESTONE));
+        level.setBlockAndUpdate(place, Blocks.COBBLESTONE.defaultBlockState());
+
+        return false;
+    }
+
+    /**
+     * Seals a two-block drop under a bot whose target is above it.
+     *
+     * <p>Ported from {@code clutch}. Both blocks below must be replaceable, and at least one
+     * horizontal neighbour of the block directly below must be solid — the block is placed
+     * against something rather than in mid-air.
+     *
+     * <p>The bot goes into {@code slow} for 12 ticks and {@code noFace} for 15, which is what
+     * stops it turning away mid-placement and walking off its own block. These two windows are
+     * the only writers of either set.
+     */
+    public void clutch(Bot bot, LivingEntity target) {
+        ServerLevel level = (ServerLevel) bot.level();
+        BlockPos botPos = BlockPos.containing(bot.position());
+
+        if (!BlockRules.isSpawn(level.getBlockState(botPos.below()))
+                || !BlockRules.isSpawn(level.getBlockState(botPos.below(2)))) {
+            return;
+        }
+
+        if (BotMath.floorY(target.position()) < botPos.getY()) {
+            return;
+        }
+
+        BlockPos place = botPos.below();
+        BlockPos anchor = null;
+
+        // Upstream kept the LAST matching neighbour, not the first -- there is no break. Its
+        // neighbours came out of a HashSet, so which one that was is unspecified; sides() fixes
+        // the order, and the last of it is north.
+        for (BlockPos side : sides(place)) {
+            if (!BlockRules.isSpawn(level.getBlockState(side))) {
+                anchor = side;
+            }
+        }
+
+        if (anchor == null) {
+            return;
+        }
+
+        state.slow.add(bot);
+        state.noFace.add(bot);
+
+        agent.later(12, () -> {
+            bot.stand();
+            state.slow.remove(bot);
+        });
+
+        agent.later(15, () -> state.noFace.remove(bot));
+
+        Vec3 faceTarget = Vec3.atCenterOf(anchor).add(0, -1.5, 0);
+
+        bot.faceLocation(faceTarget);
+        bot.look(Direction.DOWN);
+        agent.later(1, () -> bot.faceLocation(faceTarget));
+
+        bot.punch();
+        bot.sneak();
+        placeSound(level, place);
+        bot.setItem(new ItemStack(Items.COBBLESTONE));
+        level.setBlockAndUpdate(place, Blocks.COBBLESTONE.defaultBlockState());
     }
 
     /**

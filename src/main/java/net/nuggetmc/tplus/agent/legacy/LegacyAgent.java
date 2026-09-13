@@ -121,14 +121,16 @@ public final class LegacyAgent extends Agent {
         Vec3 pos = bot.position();
         LivingEntity livingTarget = targeting.locateTarget(bot, pos);
 
-        // Task 23: blockScan.tryPreMLG(bot, pos);
+        // Before the no-target return, which is upstream's order and easy to get wrong: a
+        // falling bot saves itself whether or not it has anything to chase.
+        blockScan.tryPreMLG(bot, pos);
 
         if (livingTarget == null) {
             mining.stopMining(bot);
             return;
         }
 
-        // Task 23: blockScan.clutch(bot, livingTarget);
+        blockScan.clutch(bot, livingTarget);
 
         fallDamageCheck(bot);
         behaviors.miscellaneousChecks(bot, livingTarget);

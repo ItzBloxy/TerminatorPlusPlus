@@ -4,6 +4,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
 import net.neoforged.testframework.annotation.TestHolder;
@@ -28,6 +30,7 @@ import net.minecraft.world.item.Items;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.event.BotDeathEvent;
 import net.nuggetmc.tplus.event.TerminatorLocateTargetEvent;
 
@@ -805,6 +808,124 @@ public final class AgentTests {
         // crossing a lava lake.
         helper.assertTrue(behaviors.onBoat(bot), "the bot must be on the boat it just spawned");
         helper.assertTrue(!behaviors.onBoat(target), "and the other bot must not be");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    // ---- the two clutches ---------------------------------------------------
+
+    /**
+     * Drains a bot's 60-tick spawn fall-immunity and puts it back where it started, falling.
+     *
+     * <p>{@code tryPreMLG} refuses to act while a bot has more than seven no-fall ticks left, and
+     * a bot is born with sixty of them. Nothing but time removes them, so a test about falling
+     * has to spend that time first -- while staying in the air, because the other two gates are
+     * "not on the ground" and "falling fast". Letting the bot actually fall for 55 ticks lands
+     * it, and a landed bot has groundTicks, which closes the first gate.
+     */
+    private static void readyToFall(ExtendedGameTestHelper helper, Bot bot, BlockPos at) {
+        Vec3 back = Vec3.atBottomCenterOf(helper.absolutePos(at));
+
+        for (int i = 0; i < 55; i++) {
+            bot.tick();
+            bot.snapTo(back.x, back.y, back.z, bot.getYRot(), bot.getXRot());
+        }
+
+        bot.setVelocity(new MotionVec(0, -1, 0));
+    }
+
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x12x9", floor = true)
+    @TestHolder("a_falling_bot_places_a_block_beneath_itself")
+    static void a_falling_bot_places_a_block_beneath_itself(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+
+        // A dry top slab: something the bot would land on that water CANNOT be placed on. That
+        // combination is the whole rule -- anywhere a water bucket would work, onFallDamage
+        // handles it later and a cobblestone block now would be wasted.
+        helper.setBlock(new BlockPos(4, 5, 4),
+                Blocks.STONE_SLAB.defaultBlockState().setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP));
+
+        BlockPos start = new BlockPos(4, 8, 4);
+        Bot bot = spawn(helper, registry, start, "Faller");
+        readyToFall(helper, bot, start);
+
+        blockScan.tryPreMLG(bot, bot.position());
+
+        // Three below the bot, so the block lands on top of the slab.
+        helper.assertBlockPresent(Blocks.COBBLESTONE, new BlockPos(4, 6, 4));
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x12x9", floor = true)
+    @TestHolder("a_falling_bot_leaves_water_alone")
+    static void a_falling_bot_leaves_water_alone(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+
+        // The mirror of the test above: a plain solid block takes water fine, so the pre-MLG
+        // declines and the water clutch in onFallDamage gets to do its job.
+        helper.setBlock(new BlockPos(4, 5, 4), Blocks.STONE);
+
+        BlockPos start = new BlockPos(4, 8, 4);
+        Bot bot = spawn(helper, registry, start, "Faller");
+        readyToFall(helper, bot, start);
+
+        blockScan.tryPreMLG(bot, bot.position());
+
+        helper.assertBlockNotPresent(Blocks.COBBLESTONE, new BlockPos(4, 6, 4));
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x12x9", floor = true)
+    @TestHolder("a_bot_over_a_drop_seals_it")
+    static void a_bot_over_a_drop_seals_it(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+
+        Bot bot = spawn(helper, registry, new BlockPos(4, 6, 4), "Clutcher");
+        Bot target = spawn(helper, registry, new BlockPos(4, 9, 4), "Quarry");
+
+        // Two clear blocks under the bot and something solid beside the first of them: clutch
+        // places against a neighbour, never into mid-air.
+        helper.setBlock(new BlockPos(5, 5, 4), Blocks.STONE);
+
+        blockScan.clutch(bot, target);
+
+        helper.assertBlockPresent(Blocks.COBBLESTONE, new BlockPos(4, 5, 4));
+
+        // The two windows that stop the bot turning away mid-placement and walking off its own
+        // block. They are the only writers of either set.
+        helper.assertTrue(registry.state().slow.contains(bot), "the bot must be slowed");
+        helper.assertTrue(registry.state().noFace.contains(bot), "and must not be turned");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x12x9", floor = true)
+    @TestHolder("a_bot_over_a_drop_with_nothing_to_build_against_does_not_clutch")
+    static void a_bot_over_a_drop_with_nothing_to_build_against_does_not_clutch(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+
+        Bot bot = spawn(helper, registry, new BlockPos(4, 6, 4), "Clutcher");
+        Bot target = spawn(helper, registry, new BlockPos(4, 9, 4), "Quarry");
+
+        blockScan.clutch(bot, target);
+
+        helper.assertBlockNotPresent(Blocks.COBBLESTONE, new BlockPos(4, 5, 4));
+        helper.assertTrue(registry.state().slow.isEmpty(), "and nothing is slowed for it");
 
         registry.reset();
         helper.succeed();
