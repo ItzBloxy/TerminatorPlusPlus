@@ -25,6 +25,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -35,8 +36,10 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.nuggetmc.tplus.TerminatorPlus;
 import net.nuggetmc.tplus.agent.legacy.BlockRules;
+import net.nuggetmc.tplus.agent.legacy.CustomListMode;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.TargetGoal;
+import net.nuggetmc.tplus.agent.legacy.Targeting;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
@@ -46,6 +49,7 @@ import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.util.MojangSkins;
 
 import java.util.Collection;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -256,7 +260,27 @@ public final class BotCommands {
                                 .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                         .executes(ctx -> setSolid(ctx, blockAtPosition(ctx), false)))))
                 .then(Commands.literal("listsolids").executes(BotCommands::listSolids))
-                .then(Commands.literal("clearsolids").executes(BotCommands::clearSolids)));
+                .then(Commands.literal("clearsolids").executes(BotCommands::clearSolids))
+                .then(Commands.literal("addmob")
+                        .then(Commands.argument("type",
+                                        ResourceArgument.resource(event.getBuildContext(), Registries.ENTITY_TYPE))
+                                .executes(ctx -> setMob(ctx, true))))
+                .then(Commands.literal("removemob")
+                        .then(Commands.argument("type",
+                                        ResourceArgument.resource(event.getBuildContext(), Registries.ENTITY_TYPE))
+                                .executes(ctx -> setMob(ctx, false))))
+                .then(Commands.literal("listmobs").executes(BotCommands::listMobs))
+                .then(Commands.literal("clearmobs").executes(BotCommands::clearMobs))
+                .then(Commands.literal("moblisttype")
+                        .executes(BotCommands::showMobListType)
+                        .then(Commands.argument("mode", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    for (CustomListMode mode : CustomListMode.values()) {
+                                        builder.suggest(mode.name().toLowerCase(Locale.ROOT));
+                                    }
+                                    return builder.buildFuture();
+                                })
+                                .executes(BotCommands::setMobListType))));
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
         root.then(Commands.literal("list").executes(BotCommands::list));
@@ -695,6 +719,87 @@ public final class BotCommands {
     private static String id(Block block) {
         Identifier key = BuiltInRegistries.BLOCK.getKey(block);
         return key == null ? block.getName().getString() : key.toString();
+    }
+
+    /**
+     * Adds a mob type to the custom list, or takes one out.
+     *
+     * <p>Ported from {@code addCustomMob} and {@code removeCustomMob}, folded the same way
+     * {@link #setSolid} folds its pair.
+     *
+     * <p>What the list is <i>for</i> depends on {@code moblisttype}: with CUSTOM it is the whole
+     * of the CUSTOM_LIST goal, and with HOSTILE, RAIDER or MOB it is appended to that goal's
+     * built-in set. Four of the eleven goals read it.
+     */
+    private static int setMob(CommandContext<CommandSourceStack> ctx, boolean add)
+            throws CommandSyntaxException {
+        EntityType<?> type = ResourceArgument.getResource(ctx, "type", Registries.ENTITY_TYPE).value();
+        String name = EntityType.getKey(type).toString();
+
+        boolean changed = add
+                ? Targeting.CUSTOM_MOB_LIST.add(type)
+                : Targeting.CUSTOM_MOB_LIST.remove(type);
+
+        if (!changed) {
+            ctx.getSource().sendFailure(Component.literal(name
+                    + (add ? " is already in the custom mob list." : " is not in the custom mob list.")));
+            return 0;
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                (add ? "Added " : "Removed ") + name
+                        + (add ? " to" : " from") + " the custom mob list."), true);
+        return 1;
+    }
+
+    private static int listMobs(CommandContext<CommandSourceStack> ctx) {
+        Set<EntityType<?>> types = Targeting.CUSTOM_MOB_LIST;
+
+        if (types.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "The custom mob list is empty. The CUSTOM_LIST goal will find nothing."), false);
+            return 1;
+        }
+
+        String body = types.stream().map(t -> EntityType.getKey(t).toString()).sorted()
+                .collect(Collectors.joining("\n  "));
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                types.size() + " mob type(s), mode " + Targeting.customListMode
+                        + ":\n  " + body), false);
+        return 1;
+    }
+
+    private static int clearMobs(CommandContext<CommandSourceStack> ctx) {
+        int size = Targeting.CUSTOM_MOB_LIST.size();
+        Targeting.CUSTOM_MOB_LIST.clear();
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Cleared " + size + " mob type(s) from the custom list."), true);
+        return 1;
+    }
+
+    private static int showMobListType(CommandContext<CommandSourceStack> ctx) {
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "The custom mob list mode is " + Targeting.customListMode
+                        + ". Available: " + CustomListMode.listModes()), false);
+        return 1;
+    }
+
+    private static int setMobListType(CommandContext<CommandSourceStack> ctx) {
+        String name = StringArgumentType.getString(ctx, "mode");
+        CustomListMode mode = CustomListMode.from(name);
+
+        if (mode == null) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "'" + name + "' is not a mode. Available: " + CustomListMode.listModes()));
+            return 0;
+        }
+
+        Targeting.customListMode = mode;
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Custom mob list mode is now " + mode + "."), true);
+        return 1;
     }
 
     private static int removeAll(CommandContext<CommandSourceStack> ctx) {
