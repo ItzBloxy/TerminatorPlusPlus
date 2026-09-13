@@ -94,6 +94,16 @@ public class Bot extends ServerPlayer {
     private UUID targetPlayer;
 
     /**
+     * What the {@code ENTITY} goal chases, set by {@code /tplus enemytarget}.
+     *
+     * <p>Per-bot, mirroring {@link #targetPlayer}, and it inherits that field's gap: a bot
+     * created after the command was run carries {@link EnemyTarget#NONE} and hunts nothing.
+     * {@code /tplus enemytarget} reports per-label counts so that is visible rather than
+     * mysterious.
+     */
+    private EnemyTarget enemyTarget = EnemyTarget.NONE;
+
+    /**
      * What {@code Mining.optimalTool} may choose from, and therefore how fast this bot breaks a
      * block.
      *
@@ -590,6 +600,14 @@ public class Bot extends ServerPlayer {
 
     public void setTargetPlayer(UUID target) {
         this.targetPlayer = target;
+    }
+
+    public EnemyTarget getEnemyTarget() {
+        return enemyTarget;
+    }
+
+    public void setEnemyTarget(EnemyTarget target) {
+        this.enemyTarget = target;
     }
 
     public EquipmentTier getToolTier() {

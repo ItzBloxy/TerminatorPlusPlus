@@ -15,6 +15,7 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.bot.EnemyTarget;
 import net.nuggetmc.tplus.event.TerminatorLocateTargetEvent;
 import net.nuggetmc.tplus.util.PlayerUtils;
 import org.jetbrains.annotations.Nullable;
@@ -236,6 +237,31 @@ public final class Targeting {
                         result = player;
                     }
                 }
+                break;
+            }
+
+            case ENTITY: {
+                EnemyTarget enemy = bot.getEnemyTarget();
+
+                if (!enemy.isEmpty()) {
+                    for (LivingEntity entity : livingEntities(level)) {
+                        // `bot != entity` or `generic player` makes every bot target itself and
+                        // stand still. Other bots are deliberately not excluded: bots are
+                        // ServerPlayers, and naming one with `specific` is the point.
+                        //
+                        // The fourth argument is `result`, not `null` as the PLAYER branch
+                        // passes: there can be several candidates here, so the incumbent has to
+                        // be compared against. With a set of one the first candidate meets a
+                        // null incumbent anyway and range is skipped, so a single specific
+                        // target behaves exactly like PLAYER.
+                        if (bot != entity
+                                && enemy.matches(entity.getType(), entity.getUUID())
+                                && validateCloserEntity(bot, entity, pos, result)) {
+                            result = entity;
+                        }
+                    }
+                }
+
                 break;
             }
         }
