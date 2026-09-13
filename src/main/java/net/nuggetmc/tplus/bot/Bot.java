@@ -39,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.nuggetmc.tplus.TerminatorPlus;
 import net.nuggetmc.tplus.agent.Agent;
+import net.nuggetmc.tplus.agent.legacy.BlockRules;
 import net.nuggetmc.tplus.event.BotDamageByPlayerEvent;
 import net.nuggetmc.tplus.event.BotFallDamageEvent;
 import net.nuggetmc.tplus.event.BotKilledByPlayerEvent;
@@ -599,7 +600,10 @@ public class Bot extends ServerPlayer {
         ServerLevel level = (ServerLevel) level();
         BlockState state = level.getBlockState(pos);
 
-        if (!state.isSolid()) {
+        // BlockRules.isSolid, not state.isSolid(): upstream's guard here is LegacyMats.isSolid,
+        // which consults the operator's solid list. The two agree exactly while that list is
+        // empty, which is why this went unnoticed until Plan C gave the list a writer.
+        if (!BlockRules.isSolid(state)) {
             level.setBlockAndUpdate(pos, type.defaultBlockState());
             level.playSound(null, pos, SoundEvents.STONE_PLACE, SoundSource.BLOCKS, 1f, 1f);
         }

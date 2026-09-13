@@ -12,6 +12,7 @@ import net.neoforged.testframework.annotation.TestHolder;
 import net.neoforged.testframework.gametest.EmptyTemplate;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
 import net.neoforged.testframework.gametest.GameTest;
+import net.nuggetmc.tplus.agent.legacy.BlockRules;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
@@ -384,6 +385,32 @@ public final class BotActionTests {
 
     @GameTest
     @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("attempt_block_place_honours_an_operators_solid_override")
+    static void attempt_block_place_honours_an_operators_solid_override(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1));
+
+        BlockPos relative = new BlockPos(3, 1, 1);
+        helper.setBlock(relative, Blocks.TORCH);
+
+        try {
+            BlockRules.addSolid(Blocks.TORCH);
+            bot.attemptBlockPlace(helper.absolutePos(relative), Blocks.COBBLESTONE, false);
+
+            // Upstream guards this with LegacyMats.isSolid, which consults the override. Guarding
+            // with the raw vanilla predicate instead -- which this port did until Plan C -- makes
+            // a bot overwrite exactly the blocks an operator asked it to respect.
+            helper.assertBlockPresent(Blocks.TORCH, relative);
+        } finally {
+            BlockRules.clearSolidOverrides();
+        }
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
     @TestHolder("attempt_block_place_refuses_to_overwrite_a_solid_block")
     static void attempt_block_place_refuses_to_overwrite_a_solid_block(ExtendedGameTestHelper helper) {
         BotRegistry registry = new BotRegistry();

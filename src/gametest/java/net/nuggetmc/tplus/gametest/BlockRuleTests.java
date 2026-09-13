@@ -3,6 +3,7 @@ package net.nuggetmc.tplus.gametest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
 import net.neoforged.testframework.annotation.TestHolder;
@@ -631,6 +632,57 @@ public final class BlockRuleTests {
                 "cave air overhead must count as not above ground either");
         helper.assertTrue(Blocks.CAVE_AIR.defaultBlockState().isAir(),
                 "even though the block state calls itself air");
+
+        helper.succeed();
+    }
+
+    // ---- operator overrides -------------------------------------------------
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("an_operator_can_declare_a_block_solid")
+    static void an_operator_can_declare_a_block_solid(ExtendedGameTestHelper helper) {
+        // A torch is the clearest case: vanilla says it is not solid and never will be, and it is
+        // the kind of thing a mod ships fifty variants of.
+        BlockState torch = Blocks.TORCH.defaultBlockState();
+
+        try {
+            helper.assertFalse(BlockRules.isSolid(torch), "vanilla says a torch is not solid");
+
+            helper.assertTrue(BlockRules.addSolid(Blocks.TORCH), "adding it must report a change");
+            helper.assertTrue(BlockRules.isSolid(torch), "and the override must take effect");
+
+            helper.assertFalse(BlockRules.addSolid(Blocks.TORCH), "adding it twice must not");
+            helper.assertTrue(BlockRules.solidOverrides().contains(Blocks.TORCH),
+                    "and it is listed once");
+
+            helper.assertTrue(BlockRules.removeSolid(Blocks.TORCH),
+                    "removing it must report a change");
+            helper.assertFalse(BlockRules.isSolid(torch), "and vanilla's answer must come back");
+        } finally {
+            // GameTests share a JVM and this set is static. A test that leaves an override behind
+            // changes how every later test's bots walk.
+            BlockRules.clearSolidOverrides();
+        }
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(floor = true)
+    @TestHolder("clearing_the_overrides_reports_how_many_went")
+    static void clearing_the_overrides_reports_how_many_went(ExtendedGameTestHelper helper) {
+        try {
+            BlockRules.addSolid(Blocks.TORCH);
+            BlockRules.addSolid(Blocks.LEVER);
+
+            helper.assertValueEqual(BlockRules.clearSolidOverrides(), 2, "two overrides went");
+            helper.assertTrue(BlockRules.solidOverrides().isEmpty(), "and none are left");
+            helper.assertValueEqual(BlockRules.clearSolidOverrides(), 0,
+                    "clearing an empty set is a no-op");
+        } finally {
+            BlockRules.clearSolidOverrides();
+        }
 
         helper.succeed();
     }

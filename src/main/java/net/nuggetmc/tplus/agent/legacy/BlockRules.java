@@ -12,6 +12,8 @@ import net.minecraft.world.level.block.WallSkullBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -316,18 +318,50 @@ public final class BlockRules {
     }
 
     /**
+     * Blocks an operator has declared solid, on top of vanilla's own answer.
+     *
+     * <p>Upstream's {@code LegacyMats.SOLID_MATERIALS}, whose only writer is
+     * {@code /tplus environment addsolid}. Mutable static state, deliberately: {@link #isSolid} is
+     * called from five places across three packages and none of them has a context object to
+     * thread a holder through. Plan C decision 2 records the two options that were rejected.
+     *
+     * <p>It is not cleared by {@code BotRegistry.reset}. An operator's environment configuration
+     * outliving {@code /tplus removeall} is upstream's behaviour and the right one. It does not
+     * survive a restart, which is also upstream's.
+     */
+    private static final Set<Block> SOLID_OVERRIDES = new HashSet<>();
+
+    /**
      * Solidity, as upstream meant it.
      *
-     * <p>Upstream was {@code mat.isSolid() || SOLID_MATERIALS.contains(mat)}, where
-     * {@code SOLID_MATERIALS} starts empty and is filled at runtime by {@code /bot environment},
-     * whose whole purpose is letting an operator declare a modded block solid so that bots treat
-     * it as an obstacle. That command is {@code BotEnvironmentCommand}, which Plan B defers
-     * entirely -- not Task 25, which added the other four missing subcommands and not this one.
-     * Whenever it lands it needs a mutable set behind this predicate, and this is where it goes. Until then the set is always empty, and an
-     * empty set makes this exactly upstream's predicate.
+     * <p>{@code mat.isSolid() || SOLID_MATERIALS.contains(mat)}. The second half exists for
+     * hybrid servers: a block a mod adds is not solid as far as vanilla is concerned, so bots
+     * walk into it, place water against it and fail to stand on it. The operator declares it.
      */
     public static boolean isSolid(BlockState state) {
-        return state.isSolid();
+        return state.isSolid() || SOLID_OVERRIDES.contains(state.getBlock());
+    }
+
+    /** @return true when {@code block} was not already declared solid */
+    public static boolean addSolid(Block block) {
+        return SOLID_OVERRIDES.add(block);
+    }
+
+    /** @return true when {@code block} was declared solid and is no longer */
+    public static boolean removeSolid(Block block) {
+        return SOLID_OVERRIDES.remove(block);
+    }
+
+    /** The declared blocks, for listing. Unmodifiable: the mutators above are the API. */
+    public static Set<Block> solidOverrides() {
+        return Collections.unmodifiableSet(SOLID_OVERRIDES);
+    }
+
+    /** @return how many declarations were dropped */
+    public static int clearSolidOverrides() {
+        int size = SOLID_OVERRIDES.size();
+        SOLID_OVERRIDES.clear();
+        return size;
     }
 
     /**
