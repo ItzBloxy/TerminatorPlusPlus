@@ -51,8 +51,8 @@ bot really does grind through at 1.0**:
 | Bucket | Blocks | What they are | Fix |
 |---|---|---|---|
 | Shears | **28** | 11 leaves, 16 wool, cobweb | 120t → 8t / 24t |
-| Hoe only | 18 | sculk ×5, moss ×4, hay, sponge ×2, shroomlight, target, nether and warped wart, dried kelp | 120t → 20t iron |
-| **Nothing** | **175** | glass, stained glass and panes ×33, beds ×16, candles ×32, carpets ×16, heads ×12, glowstone, sea lantern, froglights, chain, redstone lamp, end rod | — |
+| Hoe only | 18 | sculk family ×6, moss ×4, sponge ×2, hay, shroomlight, target, nether and warped wart, dried kelp | 120t → 20t iron |
+| **Nothing** | **175** | glass and panes ×35, candles and candle cakes ×34, beds ×16, carpets ×16, heads and skulls ×14, and 60 more — glowstone, sea lantern, froglights, chain, redstone lamp, end rod, reinforced deepslate, vaults | — |
 
 Three conclusions, and they decided the scope:
 
@@ -83,12 +83,14 @@ fixes those; only reading hardness does, and that is a different change with a d
 **Out:**
 
 - **A hoe.** 18 blocks, tiered, and beaten by shears on the only one that matters.
-- **Reading hardness.** It would fix the remaining 175 and change the break time of every block in
-  the game, including the iron-equals-twenty-ticks anchor that `STAGE_COST` is defined from. Backlog.
+- **Reading hardness.** It would change the remaining 175 rather than uniformly fix them — glass
+  becomes near-instant, reinforced deepslate far slower — and it would change the break time of
+  every block in the game, including the iron-equals-twenty-ticks anchor that `STAGE_COST` is
+  defined from. Backlog.
 - **Putting shears in the tier table.** See below — it breaks a faithfulness pin.
 - **Durability, enchantments, an off-hand slot.** Unchanged from Plan D's spec.
 - **A command.** Shears are not configurable: they are there whenever the tier has tools, which
-  after `asToolTier()`'s floor means always.
+  after `asToolTier()`'s floor means every bot the commands can produce.
 
 ---
 
@@ -109,8 +111,10 @@ New, alongside an untouched `tools()`:
  * everything else.
  *
  * <p>Empty when {@link #tools()} is empty, so NONE, LEATHER and CHAIN yield nothing rather
- * than a nonsensical shears-only set. No bot is ever on one of those: asToolTier floors NONE
- * to WOOD, and the command rejects the other two.
+ * than a nonsensical shears-only set. That is today's behaviour preserved, not a new rule: a
+ * tier with no tools already mines bare-handed. The commands cannot reach the case —
+ * asToolTier floors NONE to WOOD and the tools slot rejects the other two — but setToolTier
+ * is public and applies only that one floor, so a caller can still get there.
  */
 public List<Item> miningTools()
 ```
@@ -125,8 +129,8 @@ initialiser, which this is not.
 `IRON.tools()` as exactly pickaxe, axe, shovel with the comment *"IRON is upstream's LegacyItems set
 verbatim and this is what pins it."* Putting shears in the table would repeat one constant seven
 times, assert something false — shears have no tier — and destroy that pin. It would also leave a
-trap live: `acceptsAsTools()` is `tools.length > 0`, so shears in `LEATHER` or `CHAIN` would silently
-make them parse in the tools slot of `/tplus create`.
+trap live: `acceptsAsTools()` is `this == NONE || tools.length > 0`, so shears in `LEATHER` or
+`CHAIN` would silently make them parse in the tools slot of `/tplus create`.
 
 ### `Mining.optimalTool`
 
@@ -157,8 +161,8 @@ Both unchanged, and both worth a comment at the code, because both look like the
 ItemStack.EMPTY)` — it never consults the breaker's hand. So leaves keep dropping saplings rather
 than leaf blocks, and a bot does not litter a forest with item entities.
 
-Nothing in this codebase calls `ShearsItem.mineBlock`, which is the only thing that spends a shears'
-durability. Otherwise a bot would snap a pair every 238 blocks and need somewhere to get another.
+Nothing in this codebase calls `mineBlock`, which is the only thing that spends shears durability.
+Otherwise a bot would snap a pair every 238 blocks and need somewhere to get another.
 
 ---
 
@@ -219,12 +223,18 @@ Appended to Plan B's numbered list, which every plan extends, continuing from 31
 ## Backlog
 
 **Break speed ignores hardness.** `blockBreakEffect` reads the tool's destroy speed and not
-`BlockState.getDestroySpeed()`, so every block costs the same 120 progress. Glass, beds, candles,
-carpets, heads, glowstone and 169 others therefore take a bot six seconds each, where a player breaks
-glass instantly. This is upstream's behaviour and deviation 26 sanctions it.
+`BlockState.getDestroySpeed()`, so every block costs the same 120 progress. Glass, candles, beds,
+carpets and heads are 115 blocks of that on their own, and 60 more join them — all of them six
+seconds a block, where a player breaks glass instantly. This is upstream's behaviour and deviation
+26 sanctions it.
 
-The audit puts numbers on both sides for the first time: **175 blocks** would get faster, and **every
-block in the game** would change timing — including stone, which `STAGE_COST` is defined to keep at
-exactly twenty ticks for iron and which `iron_still_breaks_a_block_in_twenty_ticks` pins by name.
+The audit puts numbers on it for the first time, and they do not all point the same way. **175
+blocks** stop being uniformly 120 ticks, but that is not 175 blocks getting faster: glass is
+hardness 0.3 and would become near-instant, while reinforced deepslate at 55.0 and trial spawners
+and vaults at 50.0 would become far slower than they are now. And **every block in the game** would
+change timing, including stone — which `STAGE_COST` is defined to keep at exactly twenty ticks for
+iron, and which `iron_still_breaks_a_block_in_twenty_ticks` pins by name.
+
 That anchor is what makes the current speed model a documented extension of upstream rather than a
-drift away from it, so replacing it is a deliberate redesign, not a tuning change.
+drift away from it, so replacing it is a deliberate redesign with winners and losers, not a tuning
+change.
