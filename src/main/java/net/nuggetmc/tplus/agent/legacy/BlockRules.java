@@ -321,8 +321,9 @@ public final class BlockRules {
      * <p>Upstream was {@code mat.isSolid() || SOLID_MATERIALS.contains(mat)}, where
      * {@code SOLID_MATERIALS} starts empty and is filled at runtime by {@code /bot environment},
      * whose whole purpose is letting an operator declare a modded block solid so that bots treat
-     * it as an obstacle. That command is Task 25; when it lands it needs a mutable set behind
-     * this predicate, and this is where it goes. Until then the set is always empty, and an
+     * it as an obstacle. That command is {@code BotEnvironmentCommand}, which Plan B defers
+     * entirely -- not Task 25, which added the other four missing subcommands and not this one.
+     * Whenever it lands it needs a mutable set behind this predicate, and this is where it goes. Until then the set is always empty, and an
      * empty set makes this exactly upstream's predicate.
      */
     public static boolean isSolid(BlockState state) {
