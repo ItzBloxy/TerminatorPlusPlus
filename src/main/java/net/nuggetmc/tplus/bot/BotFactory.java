@@ -2,7 +2,9 @@ package net.nuggetmc.tplus.bot;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
@@ -155,6 +157,19 @@ public final class BotFactory {
 
                 new ClientboundRotateHeadPacket(bot, (byte) (bot.getYHeadRot() * 256f / 360f))
         };
+    }
+
+    /**
+     * Sends the block-crack overlay to every real player.
+     *
+     * <p>{@code id} is an arbitrary per-block animation id, so two bots cracking two blocks do
+     * not overwrite each other; {@code stage} runs 0 to 9, and -1 clears the overlay.
+     *
+     * <p>Replaces the Paper build's {@code InternalBridgeImpl.sendBlockDestructionPacket} and
+     * the whole {@code TerminatorPlusAPI.getInternalBridge()} indirection with it.
+     */
+    public static void broadcastCrack(Bot source, int id, BlockPos pos, int stage) {
+        broadcast(source, new ClientboundBlockDestructionPacket(id, pos, stage));
     }
 
     /** Removes the bot from clients: entity first, then the tab-list entry. */

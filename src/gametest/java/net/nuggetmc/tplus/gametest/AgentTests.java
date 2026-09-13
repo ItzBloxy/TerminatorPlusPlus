@@ -358,8 +358,10 @@ public final class AgentTests {
         Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
         spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
 
-        // Obsidian so the block never breaks and the test cannot end early.
-        helper.setBlock(new BlockPos(6, 2, 7), Blocks.OBSIDIAN);
+        // Bedrock, because it has to still be there at the end. Hardness is irrelevant to this
+        // agent — every block takes the same twenty ticks — so obsidian would be gone by tick
+        // 22 and resetHand would have cancelled the animation on tick 23.
+        helper.setBlock(new BlockPos(6, 2, 7), Blocks.BEDROCK);
 
         settle(registry, 5);
         run(registry, 60);
@@ -383,10 +385,13 @@ public final class AgentTests {
         Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
         spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
 
-        // Stone at head height: checkAt fires, and a pickaxe is the fastest of the three tools
-        // upstream considers.
+        // A block at head height makes checkAt fire, and a pickaxe is the fastest of the three
+        // tools upstream considers against obsidian. Not bedrock: nothing is mineable with a
+        // bedrock, so no tool beats the bare hand and optimalTool returns an empty stack.
         helper.setBlock(new BlockPos(6, 2, 7), Blocks.OBSIDIAN);
 
+        // Well inside the twenty ticks the progress task needs, so the obsidian is still there
+        // and the bot is still holding the tool it chose for it.
         settle(registry, 5);
         run(registry, 10);
 
@@ -409,15 +414,91 @@ public final class AgentTests {
 
         settle(registry, 5);
         Vec3 start = bot.position();
-        run(registry, 30);
 
-        // checkFenceAndGates returns "handled", so tickBot stops before move(). Until task 17
-        // supplies the progress task the fence never actually breaks — the bot just commits to
-        // it, which is what this checks.
+        // Short of the twenty ticks the progress task needs, so the fence is still standing and
+        // this is only about where the bot is: checkFenceAndGates returns "handled", so tickBot
+        // stops before move().
+        run(registry, 12);
+
         helper.assertTrue(registry.state().miningAnim.containsKey(bot),
                 "the bot must be mining the fence rather than jumping at it");
         helper.assertTrue(bot.position().distanceTo(start) < 2.0,
                 "and must not have wandered off toward the target");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bot_breaks_the_block_in_its_head_space")
+    static void a_bot_breaks_the_block_in_its_head_space(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        BlockPos head = new BlockPos(6, 2, 7);
+        helper.setBlock(head, Blocks.STONE);
+
+        settle(registry, 5);
+
+        // Ten stages two ticks apart, plus the tick checkAt needs to notice the block. The
+        // progress task runs off the registry's scheduler, so it only advances inside run().
+        run(registry, 45);
+
+        helper.assertBlockPresent(Blocks.AIR, head);
+        helper.assertTrue(registry.state().crackList.isEmpty(),
+                "the crack overlay must be cleared once the block is gone");
+        helper.assertTrue(registry.state().mining.isEmpty(),
+                "and the progress entry forgotten");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bot_breaks_the_fence_it_is_standing_in")
+    static void a_bot_breaks_the_fence_it_is_standing_in(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        BlockPos fence = new BlockPos(6, 1, 7);
+        helper.setBlock(fence, Blocks.OAK_FENCE);
+        spawn(helper, registry, fence, "Fenced");
+        spawn(helper, registry, new BlockPos(12, 1, 7), "Quarry");
+
+        settle(registry, 5);
+        run(registry, 45);
+
+        // The AT_D path: the block being broken is the one the bot is standing in, so
+        // currentTarget resolves through the offset rather than through getStandingOn.
+        helper.assertBlockPresent(Blocks.AIR, fence);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("bedrock_is_never_broken")
+    static void bedrock_is_never_broken(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        BlockPos head = new BlockPos(6, 2, 7);
+        helper.setBlock(head, Blocks.BEDROCK);
+
+        settle(registry, 5);
+        run(registry, 60);
+
+        helper.assertBlockPresent(Blocks.BEDROCK, head);
+
+        // Upstream returns without advancing rather than cancelling, so after sixty ticks the
+        // task is still registered, still on stage zero, and still costing a tick every two.
+        // Faithfully wasteful — pinned here so the waste is not mistaken for a bug later.
+        helper.assertTrue(!registry.state().crackList.isEmpty(),
+                "the progress task must still be running on the bedrock");
 
         registry.reset();
         helper.succeed();

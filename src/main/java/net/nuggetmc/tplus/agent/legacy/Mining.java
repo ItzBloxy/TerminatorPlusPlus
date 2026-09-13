@@ -2,16 +2,23 @@ package net.nuggetmc.tplus.agent.legacy;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.agent.AgentState;
 import net.nuggetmc.tplus.bot.Bot;
+import net.nuggetmc.tplus.bot.BotFactory;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Breaking blocks: tool choice, the swing animation, the crack overlay, and the break itself.
@@ -49,6 +56,17 @@ public final class Mining {
 
     /** Pitch while breaking a block above. */
     static final float PITCH_UP = -53f;
+
+    /**
+     * Blocks upstream refused to break, checked at the last moment before advancing a stage.
+     *
+     * <p>Upstream listed {@code STRUCTURE_BLOCK} twice. Deduplicated by the set, no behaviour
+     * change.
+     */
+    private static final Set<Block> UNBREAKABLE = Set.of(
+            Blocks.BARRIER, Blocks.BEDROCK,
+            Blocks.END_PORTAL_FRAME, Blocks.STRUCTURE_BLOCK,
+            Blocks.COMMAND_BLOCK, Blocks.REPEATING_COMMAND_BLOCK, Blocks.CHAIN_COMMAND_BLOCK);
 
     private final AgentState state;
     private final Agent agent;
@@ -98,8 +116,182 @@ public final class Mining {
         blockBreakEffect(bot, pos, new ScanOffset.Wrapper(offset));
     }
 
-    /** Task 17. */
+    /**
+     * Starts the progress counter that eventually breaks the block at {@code pos}.
+     *
+     * <p>Ported from {@code blockBreakEffect}. One task per block, ticking every 2 ticks through
+     * ten stages. Three things make it more than a counter:
+     *
+     * <ul>
+     * <li>It re-derives its target from the bot's <em>current</em> position each tick, through
+     *     {@code wrapper}'s offset, and cancels if that no longer matches the block it started
+     *     on. That is how mining stops when the bot moves.
+     * <li>If the bot is suspended over lava it re-aims one rung up or down the {@link ScanOffset}
+     *     ladder and keeps going, mutating the wrapper so the change persists. Upstream's
+     *     comment: "Fix boat clutching while breaking block. As a side effect, the bot is able to
+     *     break multiple blocks at once while over lava."
+     * <li>Six block types are hard-refused at the last moment — bedrock, barrier, command blocks,
+     *     the end portal frame, the structure block. It returns without advancing, so the task
+     *     spins forever on them rather than stopping. Faithfully wasteful.
+     * </ul>
+     */
     void blockBreakEffect(Bot bot, BlockPos pos, ScanOffset.Wrapper wrapper) {
+        ServerLevel level = (ServerLevel) bot.level();
+
+        if (BlockRules.isNoCrack(level.getBlockState(pos))) {
+            return;
+        }
+
+        AgentState.BlockRef ref = new AgentState.BlockRef(level.dimension(), pos);
+
+        if (state.crackList.containsKey(ref)) {
+            return;
+        }
+
+        state.crackList.put(ref, (short) agent.random().nextInt(2000));
+
+        // A one-element array because the task needs its own id to look up its progress, and the
+        // id only exists once repeating() has returned. Upstream had the same problem and solved
+        // it by keying `mining` on the BukkitRunnable, which was `this` inside the anonymous
+        // class. TickScheduler never runs a task inline, so the id is always set before the
+        // first run.
+        int[] taskId = new int[1];
+
+        taskId[0] = agent.repeating(2, () -> {
+            byte stage = state.mining.getOrDefault(taskId[0], (byte) 0);
+
+            BlockPos current = currentTarget(bot, wrapper);
+            current = adjustForLava(bot, level, pos, current, wrapper);
+
+            BlockState currentState = current == null ? null : level.getBlockState(current);
+
+            // Upstream compared both the position and the block type: the bot has to still be
+            // aiming at this block, and it has to still be the same kind of block.
+            if (!bot.isBotAlive() || current == null || !pos.equals(current)
+                    || currentState.getBlock() != level.getBlockState(pos).getBlock()) {
+                finish(bot, ref, taskId[0], pos);
+                return;
+            }
+
+            SoundEvent sound = LegacyUtils.breakBlockSound(level.getBlockState(pos));
+
+            if (stage == 9) {
+                if (sound != null) {
+                    level.playSound(null, pos, sound, SoundSource.BLOCKS, 1f, 1f);
+                }
+
+                level.destroyBlock(pos, true, bot);
+
+                if (wrapper.get() == ScanOffset.ABOVE) {
+                    // Breaking the block overhead then jumping into the hole is how a bot gets
+                    // itself stuck, so jumping is suppressed for 15 ticks.
+                    state.noJump.add(bot);
+                    agent.later(15, () -> state.noJump.remove(bot));
+                }
+
+                finish(bot, ref, taskId[0], pos);
+                return;
+            }
+
+            if (sound != null) {
+                level.playSound(null, pos, sound, SoundSource.BLOCKS, 0.3f, 1f);
+            }
+
+            if (UNBREAKABLE.contains(level.getBlockState(pos).getBlock())) {
+                return;
+            }
+
+            if (BlockRules.isInstantBreak(level.getBlockState(pos))) {
+                level.destroyBlock(pos, true, bot);
+                return;
+            }
+
+            BotFactory.broadcastCrack(bot, state.crackList.get(ref), pos, stage);
+            state.mining.put(taskId[0], (byte) (stage + 1));
+        });
+
+        state.mining.put(taskId[0], (byte) 0);
+    }
+
+    /** Clears the overlay and forgets the block. */
+    private void finish(Bot bot, AgentState.BlockRef ref, int taskId, BlockPos pos) {
+        Short id = state.crackList.remove(ref);
+
+        if (id != null) {
+            BotFactory.broadcastCrack(bot, id, pos, -1);
+        }
+
+        state.mining.remove(taskId);
+        agent.cancel(taskId);
+    }
+
+    /** Where the bot is currently aiming, per the wrapper's offset. */
+    private @Nullable BlockPos currentTarget(Bot bot, ScanOffset.Wrapper wrapper) {
+        ScanOffset offset = wrapper.get();
+
+        if (offset == null) {
+            return BlockPos.containing(bot.position()).above();
+        }
+
+        if (offset == ScanOffset.BELOW) {
+            List<BlockPos> standing = bot.getStandingOn();
+            return standing.isEmpty() ? null : standing.get(0);
+        }
+
+        return offset.apply(BlockPos.containing(bot.position()));
+    }
+
+    /**
+     * Re-aims a bot suspended over lava, and reports where it is now aiming.
+     *
+     * <p>Ported from the two near-identical blocks in the middle of upstream's
+     * {@code blockBreakEffect}. One handles lava two blocks below with the bot aiming one above
+     * the target, the other lava one block below with the bot aiming one below. Both walk the
+     * {@link ScanOffset} ladder and re-pitch.
+     */
+    private @Nullable BlockPos adjustForLava(Bot bot, ServerLevel level, BlockPos block,
+                                             @Nullable BlockPos current, ScanOffset.Wrapper wrapper) {
+        ScanOffset offset = wrapper.get();
+
+        if (offset == null || current == null) {
+            return current;
+        }
+
+        BlockPos botPos = BlockPos.containing(bot.position());
+
+        if ((offset.isSideAt() || offset.isSideUp())
+                && level.getBlockState(botPos.below(2)).getBlock() == Blocks.LAVA
+                && block.above().equals(current)) {
+            wrapper.set(offset.sideDown());
+            repitch(bot, wrapper);
+            return block;
+        }
+
+        if ((offset.isSideAt() || offset.isSideDown())
+                && level.getBlockState(botPos.below()).getBlock() == Blocks.LAVA
+                && block.below().equals(current)) {
+            wrapper.set(offset.sideUp());
+            repitch(bot, wrapper);
+            return block;
+        }
+
+        return current;
+    }
+
+    private void repitch(Bot bot, ScanOffset.Wrapper wrapper) {
+        ScanOffset offset = wrapper.get();
+
+        if (offset == null) {
+            return;
+        }
+
+        if (offset.isSideDown() || offset.isSideDown2()) {
+            bot.setBotPitch(PITCH_DOWN);
+        } else if (offset.isSideUp()) {
+            bot.setBotPitch(PITCH_UP);
+        } else if (offset.isSide()) {
+            bot.setBotPitch(0);
+        }
     }
 
     /**
