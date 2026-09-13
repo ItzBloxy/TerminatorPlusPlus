@@ -11,12 +11,16 @@ import net.neoforged.testframework.gametest.EmptyTemplate;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
 import net.neoforged.testframework.gametest.GameTest;
 import net.nuggetmc.tplus.agent.legacy.BlockScan;
+import net.nuggetmc.tplus.agent.legacy.BotBehaviors;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.Mining;
+import net.nuggetmc.tplus.agent.legacy.Navigation;
+import net.nuggetmc.tplus.agent.legacy.SurroundingScan;
 import net.nuggetmc.tplus.agent.legacy.TargetGoal;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -633,28 +637,174 @@ public final class AgentTests {
         helper.succeed();
     }
 
-    @GameTest(timeoutTicks = 600)
-    @EmptyTemplate(value = "15x6x15", floor = true)
-    @TestHolder("a_bot_breaks_a_wall_between_it_and_its_target")
-    static void a_bot_breaks_a_wall_between_it_and_its_target(ExtendedGameTestHelper helper) {
-        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
-        spawn(helper, registry, new BlockPos(3, 1, 7), "Hunter");
-        spawn(helper, registry, new BlockPos(11, 1, 7), "Quarry");
+    /**
+     * The collaborator chain LegacyAgent builds, for tests that drive one member of it.
+     *
+     * <p>Duplicating the wiring is deliberate: the constructor signatures are what keep this
+     * honest, so a change to the agent's dependencies breaks this line rather than silently
+     * testing a different graph.
+     */
+    private static Navigation navigation(BotRegistry registry) {
+        Mining mining = new Mining(registry.state(), registry.agent());
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+        SurroundingScan scan = new SurroundingScan(registry.state(), registry.agent(), mining);
+        BotBehaviors behaviors = new BotBehaviors(registry.state(), registry.agent(), mining);
 
-        // A wall exactly bot-height, so neither side can jump it. Nothing before check 15 looks
-        // ahead of a bot -- checkAt reads the block the bot is standing in -- so until checkSide
-        // was wired this pair simply bounced off the wall until the test timed out.
-        for (int z = 5; z <= 9; z++) {
-            helper.setBlock(new BlockPos(7, 1, z), Blocks.STONE);
-            helper.setBlock(new BlockPos(7, 2, z), Blocks.STONE);
+        return new Navigation(registry.state(), registry.agent(), mining, blockScan, scan, behaviors);
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_wall_between_a_bot_and_its_target_is_handled_not_walked_into")
+    static void a_wall_between_a_bot_and_its_target_is_handled_not_walked_into(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Hunter");
+        Bot target = spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        // A wall exactly bot-height, one step east. Nothing before check 15 looks ahead of a bot
+        // -- checkAt reads the block the bot is standing in -- so before checkSide was wired
+        // this pair simply bounced off it forever.
+        helper.setBlock(new BlockPos(7, 1, 7), Blocks.STONE);
+        helper.setBlock(new BlockPos(7, 2, 7), Blocks.STONE);
+
+        byte result = navigation(registry).checkSide(bot, target);
+
+        // 0 is "stay put, the scan has already started breaking it". 1 would mean reset and walk
+        // into the wall; 2 would mean walk into it anyway.
+        helper.assertValueEqual(result, (byte) 0, "a wall ahead must be handled, not walked into");
+        helper.assertTrue(!registry.state().crackList.isEmpty(),
+                "and the block must already be breaking by the time checkSide returns");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    // ---- hazards ------------------------------------------------------------
+
+    /**
+     * The agent's hazard handling, built over a registry's own state.
+     *
+     * <p>These call miscellaneousChecks directly rather than ticking a registry and waiting. The
+     * hazard branches are one-shot decisions about the block a bot is standing in, and driving
+     * them through 200 ticks of a bot hunting another bot measures the walk, not the decision --
+     * move() adds a random component to every jump, so the bot is somewhere slightly different
+     * each run.
+     */
+    private static BotBehaviors behaviors(BotRegistry registry) {
+        return new BotBehaviors(registry.state(), registry.agent(),
+                new Mining(registry.state(), registry.agent()));
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x6x9", floor = true)
+    @TestHolder("a_burning_bot_dumps_water_on_itself")
+    static void a_burning_bot_dumps_water_on_itself(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        BlockPos feet = new BlockPos(4, 1, 4);
+        Bot bot = spawn(helper, registry, feet, "Burning");
+        Bot target = spawn(helper, registry, new BlockPos(7, 1, 4), "Quarry");
+
+        bot.setRemainingFireTicks(100);
+        behaviors(registry).miscellaneousChecks(bot, target);
+
+        // placeWaterDown puts a source block at the bot's feet and picks it up five ticks later;
+        // standing in it is what actually puts the fire out, which is vanilla's job.
+        helper.assertBlockPresent(Blocks.WATER, feet);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x6x9", floor = true)
+    @TestHolder("fire_at_the_bots_feet_is_replaced_with_water")
+    static void fire_at_the_bots_feet_is_replaced_with_water(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        BlockPos feet = new BlockPos(4, 1, 4);
+        helper.setBlock(feet, Blocks.FIRE);
+
+        Bot bot = spawn(helper, registry, feet, "Firewalker");
+        Bot target = spawn(helper, registry, new BlockPos(7, 1, 4), "Quarry");
+
+        behaviors(registry).miscellaneousChecks(bot, target);
+
+        helper.assertBlockPresent(Blocks.WATER, feet);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x6x9", floor = true)
+    @TestHolder("a_bot_over_lava_gets_a_boat")
+    static void a_bot_over_lava_gets_a_boat(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        helper.setBlock(new BlockPos(4, 1, 4), Blocks.LAVA);
+        Bot bot = spawn(helper, registry, new BlockPos(4, 2, 4), "Sailor");
+        Bot target = spawn(helper, registry, new BlockPos(7, 2, 4), "Quarry");
+
+        behaviors(registry).miscellaneousChecks(bot, target);
+
+        // The lava-crossing trick: a boat under the bot, shoved at the target. Boats are
+        // per-wood entity types in 26.2, and oak is the one matching the item upstream put in
+        // the bot's hand. The check is six tenths of a block down, not a whole one, so it fires
+        // while the bot is still falling in.
+        helper.assertEntityPresent(EntityTypes.OAK_BOAT);
+        helper.assertTrue(!registry.state().boats.isEmpty(), "and the agent must own it");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x6x9", floor = true)
+    @TestHolder("the_boat_is_taken_away_again")
+    static void the_boat_is_taken_away_again(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        helper.setBlock(new BlockPos(4, 1, 4), Blocks.LAVA);
+        Bot bot = spawn(helper, registry, new BlockPos(4, 2, 4), "Sailor");
+        Bot target = spawn(helper, registry, new BlockPos(7, 2, 4), "Quarry");
+
+        behaviors(registry).miscellaneousChecks(bot, target);
+        helper.assertEntityPresent(EntityTypes.OAK_BOAT);
+
+        // The scheduler alone, not registry.tick(): a bot left sitting over lava asks for
+        // another boat every five ticks, so ticking the agent here would only prove that the
+        // cooldown works.
+        for (int i = 0; i < 21; i++) {
+            registry.scheduler().tick();
         }
 
-        settle(registry, 5);
-        run(registry, 250);
+        helper.assertEntityNotPresent(EntityTypes.OAK_BOAT);
+        helper.assertTrue(registry.state().boats.isEmpty(), "and must be forgotten with it");
 
-        // Head height on the line between them: whichever bot gets there first, this is the
-        // block the scan picks.
-        helper.assertBlockPresent(Blocks.AIR, new BlockPos(7, 2, 7));
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x6x9", floor = true)
+    @TestHolder("a_bot_on_its_own_boat_counts_as_grounded")
+    static void a_bot_on_its_own_boat_counts_as_grounded(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        BotBehaviors behaviors = behaviors(registry);
+
+        helper.setBlock(new BlockPos(4, 1, 4), Blocks.LAVA);
+        Bot bot = spawn(helper, registry, new BlockPos(4, 2, 4), "Sailor");
+        Bot target = spawn(helper, registry, new BlockPos(7, 2, 4), "Quarry");
+
+        helper.assertTrue(!behaviors.onBoat(bot), "no boat, no floating");
+
+        behaviors.miscellaneousChecks(bot, target);
+
+        // tickBot treats this as grounded, which is what lets a bot navigate and attack while
+        // crossing a lava lake.
+        helper.assertTrue(behaviors.onBoat(bot), "the bot must be on the boat it just spawned");
+        helper.assertTrue(!behaviors.onBoat(target), "and the other bot must not be");
 
         registry.reset();
         helper.succeed();

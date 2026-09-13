@@ -66,7 +66,7 @@ public final class LegacyAgent extends Agent {
         this.mining = new Mining(state, this);
         this.blockScan = new BlockScan(state, this);
         this.surroundingScan = new SurroundingScan(state, this, mining);
-        this.behaviors = new BotBehaviors(state, mining);
+        this.behaviors = new BotBehaviors(state, this, mining);
         this.navigation = new Navigation(state, this, mining, blockScan, surroundingScan, behaviors);
     }
 
@@ -131,7 +131,7 @@ public final class LegacyAgent extends Agent {
         // Task 23: blockScan.clutch(bot, livingTarget);
 
         fallDamageCheck(bot);
-        // Task 22: behaviors.miscellaneousChecks(bot, livingTarget);
+        behaviors.miscellaneousChecks(bot, livingTarget);
 
         Vec3 target = offsets
                 ? livingTarget.position().add(bot.getOffset().toVec3())
@@ -156,11 +156,18 @@ public final class LegacyAgent extends Agent {
         boolean withinTargetXZ = false;
         boolean sameXZ = Boolean.TRUE.equals(state.btCheck.get(bot));
 
-        // Task 22 adds `|| behaviors.onBoat(bot)` to this condition.
-        if (waterGround || bot.isBotOnGround()) {
+        // A bot floating on one of its own boats counts as grounded, so it can navigate and
+        // attack while crossing a lava lake.
+        if (waterGround || bot.isBotOnGround() || behaviors.onBoat(bot)) {
             byte sideResult = 1;
 
-            // Task 22: towerList reset when the bot has climbed above its target.
+            if (state.towerList.containsKey(bot)) {
+                // A bot that has climbed above its target is done towering.
+                if (BotMath.floorY(pos) > BotMath.floorY(livingTarget.position())) {
+                    state.towerList.remove(bot);
+                    behaviors.resetHand(bot, livingTarget);
+                }
+            }
 
             if (Math.abs(BotMath.floorX(pos) - BotMath.floorX(target)) <= 3
                     && Math.abs(BotMath.floorZ(pos) - BotMath.floorZ(target)) <= 3) {
