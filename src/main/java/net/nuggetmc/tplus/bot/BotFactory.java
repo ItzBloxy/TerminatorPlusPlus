@@ -78,38 +78,56 @@ public final class BotFactory {
         return bot;
     }
 
-    /** Sends the packets every client needs in order to draw this bot. */
+    /**
+     * Sends the packets every client needs in order to draw this bot.
+     *
+     * <p>Skips the player-info packet: {@code spawn} broadcasts that itself, and sending it
+     * twice is what upstream's join path did by accident.
+     */
     public static void render(Bot bot) {
-        for (Packet<?> packet : renderPackets(bot)) {
-            broadcast(bot, packet);
+        Packet<?>[] packets = renderPackets(bot);
+
+        for (int i = 1; i < packets.length; i++) {
+            broadcast(bot, packets[i]);
         }
     }
 
     /**
      * Sends the packets one client needs in order to draw {@code bot}.
      *
-     * <p>Upstream's {@code onJoin} path. The delay on the final packet is upstream's too: a
-     * client that has only just finished logging in discards entity data sent in the same tick,
-     * and renders the bot as a default skin with no equipment.
+     * <p>Upstream's {@code onJoin} path, with one bug fixed. Upstream sent
+     * {@code [ADD_PLAYER, ADD_PLAYER, entity data]} and then the head rotation — the same
+     * player-info packet twice, and <b>no spawn packet at all</b>, so a bot that existed before
+     * you logged in never appeared. An earlier draft of this port had the mirror-image bug: it
+     * sent the spawn packet but no player info, which renders the bot with no skin and no name.
+     * A client needs all four, and that is what {@code spawn} already sends to everyone.
+     *
+     * <p>The delay on the last packet is upstream's and is real: a client that has only just
+     * finished logging in discards entity data sent in the same tick.
      */
     public static void renderTo(Bot bot, ServerPlayer target, boolean login) {
         Packet<?>[] packets = renderPackets(bot);
 
-        target.connection.send(packets[0]);
-        target.connection.send(packets[1]);
+        for (int i = 0; i < packets.length - 1; i++) {
+            target.connection.send(packets[i]);
+        }
 
+        Packet<?> last = packets[packets.length - 1];
         BotRegistry registry = bot.getRegistry();
 
         if (login && registry != null) {
-            registry.scheduler().runLater(10, () -> target.connection.send(packets[2]));
+            registry.scheduler().runLater(10, () -> target.connection.send(last));
         } else {
-            target.connection.send(packets[2]);
+            target.connection.send(last);
         }
     }
 
-    /** Add-entity, entity-data, rotate-head — in that order. */
+    /** Player info, add-entity, entity-data, rotate-head — in that order. */
     private static Packet<?>[] renderPackets(Bot bot) {
         return new Packet<?>[]{
+                new ClientboundPlayerInfoUpdatePacket(
+                        ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER, bot),
+
                 new ClientboundAddEntityPacket(
                         bot.getId(),
                         bot.getUUID(),

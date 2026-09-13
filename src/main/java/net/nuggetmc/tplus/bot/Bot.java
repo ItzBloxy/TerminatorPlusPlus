@@ -24,6 +24,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
@@ -486,11 +487,6 @@ public class Bot extends ServerPlayer {
         return isBlocking();
     }
 
-    /** Read by the damage path, which must see the flag rather than vanilla's view. */
-    boolean isBlockingFlag() {
-        return blocking;
-    }
-
     // ---- state ------------------------------------------------------------
 
     public MotionVec getOffset() {
@@ -660,7 +656,10 @@ public class Bot extends ServerPlayer {
             vel.multiply(0.8).setY(0.4);
         }
 
-        if (attacker instanceof LivingEntity living) {
+        // Player, not LivingEntity. Upstream wrote the test twice, redundantly, and both
+        // times as `attacker.getBukkitEntity() instanceof Player` — so a mob swinging a
+        // Knockback sword gets no boost. Broadening it here would change mob combat.
+        if (attacker instanceof Player living) {
             int level = knockbackLevel(living);
 
             if (level == 1) {
@@ -687,7 +686,7 @@ public class Bot extends ServerPlayer {
      * holder, so the Bukkit {@code ItemMeta.hasEnchant} test becomes a registry lookup plus an
      * {@code EnchantmentHelper} query.
      */
-    private int knockbackLevel(LivingEntity attacker) {
+    private int knockbackLevel(Player attacker) {
         return attacker.level().registryAccess()
                 .lookup(Registries.ENCHANTMENT)
                 .flatMap(registry -> registry.get(Enchantments.KNOCKBACK))

@@ -61,8 +61,10 @@ public class TerminatorPlus {
     @SubscribeEvent
     public void onLivingDrops(LivingDropsEvent event) {
         if (event.getEntity() instanceof Bot bot) {
-            REGISTRY.agent().onBotDeath(
-                    new BotDeathEvent(bot, event.getSource(), event.getDrops()));
+            // bot.agent(), not REGISTRY.agent(): a bot belongs to the registry that spawned it,
+            // and a GameTest uses its own. Routing through the global registry would dispatch a
+            // test's bot death to the production agent.
+            bot.agent().onBotDeath(new BotDeathEvent(bot, event.getSource(), event.getDrops()));
         }
     }
 
@@ -75,11 +77,15 @@ public class TerminatorPlus {
      */
     @SubscribeEvent
     public void onChangeTarget(LivingChangeTargetEvent event) {
-        if (REGISTRY.isMobTarget()) {
+        if (!(event.getNewAboutToBeSetTarget() instanceof Bot bot)) {
             return;
         }
 
-        if (event.getNewAboutToBeSetTarget() instanceof Bot) {
+        // The bot's own registry owns the flag, for the same reason onLivingDrops uses
+        // bot.agent(). A bot with no registry cannot be reached by this path in practice.
+        BotRegistry owner = bot.getRegistry();
+
+        if (owner != null && !owner.isMobTarget()) {
             event.setCanceled(true);
         }
     }

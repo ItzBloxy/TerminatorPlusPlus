@@ -313,6 +313,24 @@ and the run still prints `All N required tests passed` with the old N. Plan A's 
 
 The id convention in this plan is the method name verbatim, so the two read the same.
 
+**A mock player can deal damage, but cannot receive it and cannot live in the level.**
+`GameTestHelper.makeMockServerPlayer` builds a `ServerPlayer` whose `connection` is null. Using it
+as a `damageSources().playerAttack(...)` source is fine. But `hurtServer` on one throws, because
+ServerPlayer's damage path sends packets, and `helper.getLevel().addFreshEntity(mock)` **crashes the
+whole server**, because the world tick sends packets too. Neither is a readable failure: the first
+is swallowed into an `UnknownGameTestException` with no stack, the second ends the run.
+
+So in tests, mock players are attackers and **bots are targets** — `Bot` carries `BotConnection`,
+which swallows every send. Tasks 12, 16, 19, 22 and 23 as written call `addFreshEntity` on a mock
+player to give the agent something to chase; those need
+`helper.makeMockServerPlayerInLevel()` instead, which goes through `placeNewPlayer` with an
+`EmbeddedChannel` behind it, or a second bot with the goal set to `NEAREST_BOT`.
+
+**Bot yaw is normalised into [0, 360).** `BotMath.fetchYawPitch` returns a positive angle where
+vanilla's `getYRot` is usually (-180, 180]. Nothing downstream cares — `setRot` takes `yaw % 360`
+and the wire format is a byte — but an assertion that subtracts two yaws has to wrap them with
+`Mth.wrapDegrees` first.
+
 **`assertValueEqual` is `equals` on a boxed value, not numeric comparison.** For floats that means
 bit-pattern equality: `-0.0f` does not equal `0.0f`, and `NaN` does not equal itself. A flat
 direction gives `BotMath.fetchPitch` a pitch of `-0.0`, which is correct and which
