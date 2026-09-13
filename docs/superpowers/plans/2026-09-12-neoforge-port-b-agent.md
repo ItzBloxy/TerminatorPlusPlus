@@ -9907,10 +9907,36 @@ the commit message. The sanctioned ones, for reference:
 4. `tryPreMLG`'s comparator has the mirrored second arm upstream's comment intended (Task 23).
 5. `AgentState.forget` clears per-bot entries that upstream leaked (Task 7).
 6. `onBotKilledByPlayer` runs on the server thread instead of async (Task 7).
-7. `BlockRules.INSTANT_BREAK` uses block constants where upstream named items (Task 13).
-8. `Mining.downMine`'s nudge — pending the Bukkit `getLocation` check in Task 18 Step 1.
+7. `BlockRules.INSTANT_BREAK` and `NONSOLID` use block constants where upstream named items —
+   `WHEAT_SEEDS`, `BEETROOT_SEEDS` and `STRING`, none of which any block ever matched (Task 13).
+8. ~~`Mining.downMine`'s nudge~~ — **resolved in Task 18, not a deviation.** Bukkit's
+   `Entity#getLocation()` returns a fresh `Location` per call, so upstream's subtraction is
+   between two objects and the arithmetic is real.
 9. `GroundCheck` empty-shape fallback returns a flat box rather than null (Task 13).
 10. The `BotLog` line in `BotRegistry.noteTickFailure` (Task 1).
+11. `BlockRules.canStandOn` names the moss carpets alongside the `WOOL_CARPETS` tag, because
+    upstream's rule was `endsWith("_CARPET")` and they are not wool (Task 13).
+12. `Agent.later`'s one-shots remove their own id from `taskList` when they run. Upstream's set
+    only grew, and this port made that worse by routing all 27 delayed calls through one method
+    (phase 5/6 review).
+13. `BotRegistry.remove` cancels the swing animation before `AgentState.forget` drops the handle
+    to it. An extension of 5, and the reason `TickScheduler.isCancelled` exists (phase 5/6
+    review).
+14. `Level.destroyBlock` fires level event 2001, so a broken block gets vanilla's break particles
+    and sound on top of the sound `blockBreakEffect` plays itself. Bukkit's `breakNaturally()`
+    did not. Cosmetic, and the alternative is reimplementing `destroyBlock` (Task 17).
+15. The first stage of a break lands one tick later than upstream's, because
+    `TickScheduler.runRepeating` starts one period out where `runTaskTimer(plugin, 0, n)` starts
+    on the next tick. Every break takes 21 ticks rather than 20 (Task 16).
+
+Two more that are **not** deviations but look like them from the diff, and cost a reviewer time
+in the phase 5/6 pass:
+
+- `Mining.adjustForLava` returns early from its first branch where upstream fell through to a
+  second `if`. Equivalent: the first branch sets `cur = block`, which makes the second's
+  `block.below().equals(cur)` false in every case.
+- `BlockScan.placeBlock`'s first neighbour loop returns early where upstream set a flag and kept
+  iterating. Equivalent only while the loop body has no side effect; see the note on it.
 
 Anything you find that is not on that list is a bug. Fix it, or add it to the list with a reason.
 
