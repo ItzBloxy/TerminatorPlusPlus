@@ -348,6 +348,28 @@ public final class AgentTests {
         helper.succeed();
     }
 
+    @GameTest(timeoutTicks = 600)
+    @EmptyTemplate(value = "9x30x9", floor = true)
+    @TestHolder("a_falling_bot_clutches_with_water")
+    static void a_falling_bot_clutches_with_water(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        // A target at the bottom so the agent has something to chase, and the falling bot high
+        // above it. onFallDamage is what has to save it: find the floor, place water, cancel
+        // the damage, and pick the water back up five ticks later.
+        spawn(helper, registry, new BlockPos(4, 1, 4), "Quarry");
+        Bot faller = spawn(helper, registry, new BlockPos(4, 25, 4), "Faller");
+
+        float before = faller.getHealth();
+        run(registry, 150);
+
+        helper.assertTrue(faller.isAlive(), "the bot must survive a 24-block fall");
+        helper.assertValueEqual(faller.getHealth(), before, "and take no fall damage");
+
+        registry.reset();
+        helper.succeed();
+    }
+
     @GameTest(timeoutTicks = 200)
     @EmptyTemplate(value = "7x5x7", floor = true)
     @TestHolder("drops_disabled_clears_the_drop_list")

@@ -5,11 +5,16 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.agent.AgentState;
@@ -20,6 +25,8 @@ import net.nuggetmc.tplus.event.BotDeathEvent;
 import net.nuggetmc.tplus.event.BotFallDamageEvent;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.util.PlayerUtils;
+
+import java.util.OptionalDouble;
 
 /**
  * The bot AI. Ported from {@code api/agent/legacyagent/LegacyAgent}, whose own header comment
@@ -245,15 +252,101 @@ public final class LegacyAgent extends Agent {
     }
 
     /**
-     * The MLG. Left empty until task 14 builds the placement predicates it needs.
+     * The MLG. Ported from {@code onFallDamage}.
      *
-     * <p>Upstream's version searches {@code event.getStandingOn()} for a block it can put water
-     * (or twisting vines) on, places it, cancels the fall damage, and schedules picking the
-     * water back up five ticks later.
+     * <p>Finds somewhere in {@code standingOn} that will take water (or twisting vines in the
+     * Nether), places it, cancels the fall damage, and schedules picking the water back up five
+     * ticks later. Cancelling is what "the clutch worked" means; if nothing takes the placement
+     * the event is left alone and the bot takes the hit.
+     *
+     * <p>The waterlogging branch is upstream's: placing water "on" a waterloggable block means
+     * setting its {@code waterlogged} property rather than replacing it, and the pickup has to
+     * undo it the same way.
      */
     @Override
     public void onFallDamage(BotFallDamageEvent event) {
-        // Task 14.
+        Bot bot = event.getBot();
+        ServerLevel level = (ServerLevel) bot.level();
+        boolean nether = bot.isNether();
+        double yPos = bot.getY();
+
+        bot.look(Direction.DOWN);
+
+        Item itemType = nether ? Items.TWISTING_VINES : Items.WATER_BUCKET;
+        Block placeType = nether ? Blocks.TWISTING_VINES : Blocks.WATER;
+        SoundEvent sound = nether ? SoundEvents.WEEPING_VINES_PLACE : SoundEvents.BUCKET_EMPTY;
+
+        BlockPos ground = null;
+
+        for (BlockPos candidate : event.getStandingOn()) {
+            boolean ok = nether
+                    ? BlockPlacement.canPlaceTwistingVines(level, candidate)
+                    : BlockPlacement.canPlaceWater(level, candidate, OptionalDouble.of(yPos));
+
+            if (ok) {
+                ground = candidate;
+                break;
+            }
+        }
+
+        if (ground == null) {
+            return;
+        }
+
+        BlockPos pos = BlockPlacement.shouldReplace(level, ground, yPos, nether)
+                ? ground
+                : ground.above();
+
+        BlockState state = level.getBlockState(pos);
+        boolean waterloggable = !nether && state.hasProperty(BlockStateProperties.WATERLOGGED);
+        boolean waterlogged = waterloggable && state.getValue(BlockStateProperties.WATERLOGGED);
+
+        // Upstream cancels before deciding whether anything actually needs placing, so a bot
+        // landing on water it already placed still survives the fall.
+        event.setCancelled(true);
+
+        if (state.getBlock() == placeType || waterlogged) {
+            return;
+        }
+
+        bot.punch();
+
+        if (waterloggable) {
+            level.setBlockAndUpdate(pos, state.setValue(BlockStateProperties.WATERLOGGED, true));
+        } else {
+            level.setBlockAndUpdate(pos, placeType.defaultBlockState());
+        }
+
+        level.playSound(null, pos, sound, SoundSource.BLOCKS, 1f, 1f);
+
+        if (itemType != Items.WATER_BUCKET) {
+            return;
+        }
+
+        bot.setItem(new ItemStack(Items.BUCKET));
+
+        BlockPos pickup = pos;
+
+        // later(), not a bare scheduler call: upstream used runTaskLater here without adding it
+        // to its task list, so disabling the agent left the water behind.
+        later(5, () -> {
+            BlockState now = level.getBlockState(pickup);
+            boolean loggedNow = now.getValueOrElse(BlockStateProperties.WATERLOGGED, false);
+
+            if (now.getBlock() != Blocks.WATER && !loggedNow) {
+                return;
+            }
+
+            bot.look(Direction.DOWN);
+            bot.setItem(new ItemStack(Items.WATER_BUCKET));
+            level.playSound(null, pickup, SoundEvents.BUCKET_FILL, SoundSource.BLOCKS, 1f, 1f);
+
+            if (loggedNow) {
+                level.setBlockAndUpdate(pickup, now.setValue(BlockStateProperties.WATERLOGGED, false));
+            } else {
+                level.setBlockAndUpdate(pickup, Blocks.AIR.defaultBlockState());
+            }
+        });
     }
 
     private static BlockState stateAt(ServerLevel level, Vec3 pos) {

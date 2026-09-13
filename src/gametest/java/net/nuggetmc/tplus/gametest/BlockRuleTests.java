@@ -9,6 +9,10 @@ import net.neoforged.testframework.annotation.TestHolder;
 import net.neoforged.testframework.gametest.EmptyTemplate;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
 import net.neoforged.testframework.gametest.GameTest;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Half;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import net.nuggetmc.tplus.agent.legacy.BlockPlacement;
 import net.nuggetmc.tplus.agent.legacy.BlockRules;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
@@ -16,6 +20,8 @@ import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
 import net.nuggetmc.tplus.agent.legacy.LegacyUtils;
 import net.nuggetmc.tplus.agent.legacy.LevelRules;
+
+import java.util.OptionalDouble;
 
 /**
  * Tests for the block predicates the agent decides with.
@@ -301,6 +307,242 @@ public final class BlockRuleTests {
         helper.assertFalse(BlockRules.isSpawn(Blocks.WATER.defaultBlockState()),
                 "water is deliberately absent from SPAWN");
         helper.assertFalse(BlockRules.isSpawn(Blocks.STONE.defaultBlockState()), "stone");
+
+        helper.succeed();
+    }
+
+    // ---- placement predicates -----------------------------------------------
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("water_goes_on_a_plain_solid_block")
+    static void water_goes_on_a_plain_solid_block(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        helper.setBlock(relative, Blocks.STONE);
+
+        helper.assertTrue(BlockPlacement.canPlaceWater(helper.getLevel(),
+                helper.absolutePos(relative), OptionalDouble.empty()), "stone takes water on top");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("water_does_not_go_on_a_dry_top_slab")
+    static void water_does_not_go_on_a_dry_top_slab(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP));
+
+        // A top slab is solid, but water placed against it flows into the gap underneath
+        // instead of forming a landing surface. Upstream excluded it unless already waterlogged.
+        helper.assertFalse(BlockPlacement.canPlaceWater(helper.getLevel(),
+                        helper.absolutePos(relative), OptionalDouble.empty()),
+                "a dry top slab must be refused");
+
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP)
+                .setValue(BlockStateProperties.WATERLOGGED, true));
+
+        helper.assertTrue(BlockPlacement.canPlaceWater(helper.getLevel(),
+                        helper.absolutePos(relative), OptionalDouble.empty()),
+                "a waterlogged top slab already has water and is fine");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("a_bottom_stair_depends_on_where_the_bot_is")
+    static void a_bottom_stair_depends_on_where_the_bot_is(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        BlockPos pos = helper.absolutePos(relative);
+        helper.setBlock(relative, Blocks.STONE_STAIRS.defaultBlockState()
+                .setValue(BlockStateProperties.HALF, Half.BOTTOM));
+
+        // Upstream's most obscure rule: a dry bottom-half stair is refused UNLESS the falling
+        // entity's own block Y matches the stair's, in which case the bot is already inside the
+        // empty upper half and the water will sit at its feet. The OptionalDouble is that
+        // entity Y — absent means "no entity context", which refuses.
+        helper.assertFalse(BlockPlacement.canPlaceWater(helper.getLevel(), pos, OptionalDouble.empty()),
+                "no entity context: refuse");
+        helper.assertFalse(BlockPlacement.canPlaceWater(helper.getLevel(), pos,
+                        OptionalDouble.of(pos.getY() + 5)),
+                "entity well above: refuse");
+        // Exactly the block's Y, not pos.getY() + 0.5. The (int) cast truncates toward zero,
+        // so at the negative Y a GameTest structure sits at, +0.5 lands on the block ABOVE.
+        // That is upstream's bug, kept; the next test pins it.
+        helper.assertTrue(BlockPlacement.canPlaceWater(helper.getLevel(), pos,
+                        OptionalDouble.of(pos.getY())),
+                "entity inside the same block: allow");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("water_goes_on_a_snow_layer_but_not_in_mid_air")
+    static void water_goes_on_a_snow_layer_but_not_in_mid_air(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        helper.setBlock(relative, Blocks.SNOW);
+
+        helper.assertTrue(BlockPlacement.canPlaceWater(helper.getLevel(),
+                        helper.absolutePos(relative), OptionalDouble.empty()),
+                "a snow layer is a valid landing");
+
+        helper.assertFalse(BlockPlacement.canPlaceWater(helper.getLevel(),
+                        helper.absolutePos(new BlockPos(3, 3, 3)), OptionalDouble.empty()),
+                "air is not a valid landing");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("twisting_vines_need_a_surface_that_is_not_on_the_reject_list")
+    static void twisting_vines_need_a_surface_that_is_not_on_the_reject_list(ExtendedGameTestHelper helper) {
+        helper.setBlock(new BlockPos(1, 1, 1), Blocks.NETHERRACK);
+        helper.assertTrue(BlockPlacement.canPlaceTwistingVines(helper.getLevel(),
+                helper.absolutePos(new BlockPos(1, 1, 1))), "netherrack");
+
+        helper.setBlock(new BlockPos(2, 1, 1), Blocks.OAK_FENCE);
+        helper.assertFalse(BlockPlacement.canPlaceTwistingVines(helper.getLevel(),
+                helper.absolutePos(new BlockPos(2, 1, 1))), "a fence is on the reject list");
+
+        // The four that isFaceSturdy would have got wrong. All are full cubes with a solid top
+        // face, so the compression an earlier draft of this plan used would have accepted them;
+        // upstream rejects all four by name.
+        helper.setBlock(new BlockPos(3, 1, 1), Blocks.FARMLAND);
+        helper.assertFalse(BlockPlacement.canPlaceTwistingVines(helper.getLevel(),
+                helper.absolutePos(new BlockPos(3, 1, 1))), "farmland");
+
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.HONEY_BLOCK);
+        helper.assertFalse(BlockPlacement.canPlaceTwistingVines(helper.getLevel(),
+                helper.absolutePos(new BlockPos(4, 1, 1))), "honey block");
+
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.OAK_LEAVES);
+        helper.assertFalse(BlockPlacement.canPlaceTwistingVines(helper.getLevel(),
+                helper.absolutePos(new BlockPos(5, 1, 1))), "leaves");
+
+        helper.setBlock(new BlockPos(1, 1, 3), Blocks.END_PORTAL_FRAME);
+        helper.assertFalse(BlockPlacement.canPlaceTwistingVines(helper.getLevel(),
+                helper.absolutePos(new BlockPos(1, 1, 3))), "end portal frame");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("twisting_vines_go_on_one_or_eight_snow_layers_only")
+    static void twisting_vines_go_on_one_or_eight_snow_layers_only(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        BlockPos pos = helper.absolutePos(relative);
+
+        // Upstream's rule: exactly 1 or 8. One layer leaves a full block of space above and
+        // eight is a full block; anything between leaves a partial gap the vine falls into.
+        for (int layers : new int[]{1, 8}) {
+            helper.setBlock(relative, Blocks.SNOW.defaultBlockState()
+                    .setValue(BlockStateProperties.LAYERS, layers));
+            helper.assertTrue(BlockPlacement.canPlaceTwistingVines(helper.getLevel(), pos),
+                    layers + " snow layers must be allowed");
+        }
+
+        for (int layers : new int[]{2, 5, 7}) {
+            helper.setBlock(relative, Blocks.SNOW.defaultBlockState()
+                    .setValue(BlockStateProperties.LAYERS, layers));
+            helper.assertFalse(BlockPlacement.canPlaceTwistingVines(helper.getLevel(), pos),
+                    layers + " snow layers must be refused");
+        }
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("should_replace_takes_partial_height_blocks_only")
+    static void should_replace_takes_partial_height_blocks_only(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        BlockPos pos = helper.absolutePos(relative);
+        // Exactly the block's Y — see a_bottom_stair_depends_on_where_the_bot_is for why a
+        // fractional offset does not work at negative Y.
+        double insideY = pos.getY();
+
+        // shouldReplace answers "does the water go INTO this block, or on top of it?" — it is
+        // what decides between ground and ground.above() in onFallDamage. Upstream's list is
+        // partial-height shapes, NOT "non-solid blocks".
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM));
+        helper.assertTrue(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
+                "a bottom slab leaves the top half free, so water goes in");
+
+        helper.setBlock(relative, Blocks.STONE);
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
+                "stone is built on top of");
+
+        // A snow layer looks like the obvious candidate and is deliberately absent from
+        // upstream's list. An earlier draft of this plan asserted the opposite.
+        helper.setBlock(relative, Blocks.SNOW);
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
+                "a snow layer is NOT in upstream's replace list");
+
+        // Neither is a carpet, which the same draft also wrongly included.
+        helper.setBlock(relative, Blocks.CARPET.pick(DyeColor.WHITE));
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, insideY, false),
+                "nor is a carpet");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("the_entity_y_gate_truncates_toward_zero")
+    static void the_entity_y_gate_truncates_toward_zero(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        BlockPos pos = helper.absolutePos(relative);
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM));
+
+        // Upstream compares `(int) entityY` against a FLOORED block coordinate. Those agree
+        // above y = 0 and differ by one below it, because the cast truncates toward zero:
+        // (int) -58.6 is -58, while the block is -59.
+        //
+        // A GameTest structure sits at negative Y, so this is the real-world case. A bot
+        // standing anywhere inside the block but not exactly on its boundary fails the gate,
+        // which silently disables slab and stair clutches throughout the deepslate range.
+        //
+        // Ported faithfully. Mth.floor would fix it and would change clutch behaviour across a
+        // large part of every modern world, which is a behaviour change rather than a
+        // translation. This test exists so the decision is visible rather than accidental.
+        helper.assertTrue(pos.getY() < 0,
+                "this test only means anything below y=0, and the structure is at " + pos.getY());
+
+        helper.assertTrue(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY(), false),
+                "exactly on the block boundary: the gate passes");
+
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY() + 0.4, false),
+                "0.4 of a block higher — still inside the same block — and the gate fails");
+
+        helper.succeed();
+    }
+
+    @GameTest
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("should_replace_has_two_leading_gates")
+    static void should_replace_has_two_leading_gates(ExtendedGameTestHelper helper) {
+        BlockPos relative = new BlockPos(1, 1, 1);
+        BlockPos pos = helper.absolutePos(relative);
+        helper.setBlock(relative, Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM));
+
+        // Gate one: the bot's own block Y must equal the block's, so a bot still well above the
+        // slab builds on top of it rather than into it.
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY() + 4, false),
+                "an entity four blocks up must not replace");
+
+        // Gate two: the Nether never replaces, because twisting vines need a surface to sit on
+        // rather than a space to fill.
+        helper.assertFalse(BlockPlacement.shouldReplace(helper.getLevel(), pos, pos.getY() + 0.4, true),
+                "the Nether never replaces");
 
         helper.succeed();
     }
