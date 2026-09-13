@@ -8,6 +8,7 @@ import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -26,9 +27,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -44,13 +42,14 @@ import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.bot.EquipmentTier;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.util.MojangSkins;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
@@ -80,25 +79,37 @@ public final class BotCommands {
      * <p>{@code Item} constants rather than stacks: a stack built in a static initialiser throws
      * "Components not bound yet", the same trap {@code Mining.TOOLS} documents.
      */
-    private static final Map<String, Item[]> ARMOR_TIERS = Map.of(
-            "none", new Item[]{null, null, null, null},
-            "leather", new Item[]{Items.LEATHER_BOOTS, Items.LEATHER_LEGGINGS,
-                    Items.LEATHER_CHESTPLATE, Items.LEATHER_HELMET},
-            "chain", new Item[]{Items.CHAINMAIL_BOOTS, Items.CHAINMAIL_LEGGINGS,
-                    Items.CHAINMAIL_CHESTPLATE, Items.CHAINMAIL_HELMET},
-            "gold", new Item[]{Items.GOLDEN_BOOTS, Items.GOLDEN_LEGGINGS,
-                    Items.GOLDEN_CHESTPLATE, Items.GOLDEN_HELMET},
-            "iron", new Item[]{Items.IRON_BOOTS, Items.IRON_LEGGINGS,
-                    Items.IRON_CHESTPLATE, Items.IRON_HELMET},
-            "diamond", new Item[]{Items.DIAMOND_BOOTS, Items.DIAMOND_LEGGINGS,
-                    Items.DIAMOND_CHESTPLATE, Items.DIAMOND_HELMET},
-            "netherite", new Item[]{Items.NETHERITE_BOOTS, Items.NETHERITE_LEGGINGS,
-                    Items.NETHERITE_CHESTPLATE, Items.NETHERITE_HELMET});
-
-    private static final EquipmentSlot[] ARMOR_SLOTS = {
-            EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD};
-
     private BotCommands() {
+    }
+
+    /** Suggests only the tiers that will actually parse in this slot. */
+    private static SuggestionProvider<CommandSourceStack> tierSuggestions(boolean armor) {
+        return (ctx, builder) -> {
+            (armor ? EquipmentTier.armorTiers() : EquipmentTier.toolTiers()).forEach(builder::suggest);
+            return builder.buildFuture();
+        };
+    }
+
+    /**
+     * Resolves a tier name for one slot, or sends the failure and returns null.
+     *
+     * <p>The valid names come from the same predicate {@link #tierSuggestions} reads, so a tier
+     * that tab-completes but then fails to parse cannot happen. Vanilla tiers are not symmetric —
+     * there is no wooden chestplate and no chainmail pickaxe — so the two slots reject different
+     * things and the message has to say which slot it is talking about.
+     */
+    private static @Nullable EquipmentTier tier(CommandSourceStack source, String name, boolean armor) {
+        EquipmentTier tier = EquipmentTier.byName(name);
+        boolean ok = tier != null && (armor ? tier.acceptsAsArmor() : tier.acceptsAsTools());
+
+        if (!ok) {
+            source.sendFailure(Component.literal("'" + name + "' is not a valid "
+                    + (armor ? "armour" : "tools") + " tier. Available: "
+                    + String.join(", ", armor ? EquipmentTier.armorTiers() : EquipmentTier.toolTiers())));
+            return null;
+        }
+
+        return tier;
     }
 
     // Names use StringArgumentType.string(), not word(): Brigadier's unquoted-string
@@ -221,11 +232,13 @@ public final class BotCommands {
 
         root.then(Commands.literal("armor")
                 .then(Commands.argument("tier", StringArgumentType.word())
-                        .suggests((ctx, builder) -> {
-                            ARMOR_TIERS.keySet().forEach(builder::suggest);
-                            return builder.buildFuture();
-                        })
+                        .suggests(tierSuggestions(true))
                         .executes(BotCommands::armor)));
+
+        root.then(Commands.literal("tools")
+                .then(Commands.argument("tier", StringArgumentType.word())
+                        .suggests(tierSuggestions(false))
+                        .executes(BotCommands::tools)));
 
         root.then(Commands.literal("info")
                 .then(Commands.argument("name", StringArgumentType.string())
@@ -471,34 +484,56 @@ public final class BotCommands {
     }
 
     /**
-     * Equips every bot with an armor tier.
+     * Equips every bot with an armour tier.
      *
-     * <p>Ported from {@code armor}. Upstream wrote the Bukkit inventory <i>and</i> sent the
-     * equipment packets, with the comment "packet sending to ensure";
-     * {@code Bot.setItem(stack, slot)} already does both, so one call per slot is enough.
+     * <p>Ported from {@code armor}. The four-piece loop moved to {@code EquipmentTier.equipArmor}
+     * so the index-to-slot pairing sits beside the table it indexes.
      */
     private static int armor(CommandContext<CommandSourceStack> ctx) {
-        String tier = StringArgumentType.getString(ctx, "tier").toLowerCase();
-        Item[] pieces = ARMOR_TIERS.get(tier);
+        EquipmentTier tier = tier(ctx.getSource(), StringArgumentType.getString(ctx, "tier"), true);
 
-        if (pieces == null) {
-            ctx.getSource().sendFailure(Component.literal(
-                    "'" + tier + "' is not a valid tier. Available: "
-                            + ARMOR_TIERS.keySet().stream().sorted().collect(Collectors.joining(", "))));
+        if (tier == null) {
             return 0;
         }
 
         Collection<Bot> bots = TerminatorPlus.registry().bots();
-
-        for (Bot bot : bots) {
-            for (int i = 0; i < ARMOR_SLOTS.length; i++) {
-                ItemStack stack = pieces[i] == null ? ItemStack.EMPTY : new ItemStack(pieces[i]);
-                bot.setItem(stack, ARMOR_SLOTS[i]);
-            }
-        }
+        bots.forEach(tier::equipArmor);
 
         ctx.getSource().sendSuccess(() -> Component.literal(
-                "Set armor tier '" + tier + "' for " + bots.size() + " bot(s)"), true);
+                "Set armour tier '" + tier.id() + "' for " + bots.size() + " bot(s)"), true);
+        return 1;
+    }
+
+    /**
+     * Sets every bot's tool tier.
+     *
+     * <p>New: upstream had no equivalent, because its tool list was static. Without this, tools
+     * would be the only one of the three equipment properties that can be set at spawn and never
+     * changed afterwards.
+     *
+     * <p>This is what decides how fast a bot breaks a block: {@code Mining.blockBreakEffect}
+     * accrues the held tool's destroy speed. Block hardness is still ignored, as upstream ignored
+     * it. {@code none} floors at wood — there is no bare-handed tier.
+     */
+    private static int tools(CommandContext<CommandSourceStack> ctx) {
+        EquipmentTier requested = tier(ctx.getSource(),
+                StringArgumentType.getString(ctx, "tier"), false);
+
+        if (requested == null) {
+            return 0;
+        }
+
+        // Resolved here as well as inside setToolTier so the message names the tier the bots
+        // actually got. asToolTier is the single definition of the floor, so the two cannot
+        // disagree.
+        EquipmentTier applied = requested.asToolTier();
+
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+        bots.forEach(bot -> bot.setToolTier(applied));
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Set tool tier '" + applied.id() + "' for " + bots.size() + " bot(s)"
+                        + (applied == requested ? "" : " ('none' floors at wood)")), true);
         return 1;
     }
 
