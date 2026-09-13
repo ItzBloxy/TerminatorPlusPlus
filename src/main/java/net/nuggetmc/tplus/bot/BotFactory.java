@@ -95,9 +95,14 @@ public final class BotFactory {
             // It looks exactly like an oversight to fix; doing so would change which entities
             // vanilla systems can resolve by UUID, and nothing in this port needs it.
         } else {
-            level.addFreshEntity(bot);
+            // Player info FIRST, then the entity. A client that is told to add a player it has
+            // no profile for logs "Server attempted to add player prior to sending player info"
+            // and drops the entity packet on the floor -- the bot then only appears when the
+            // chunk tracker gets round to re-sending it, without the skin. The playerlist branch
+            // above already had this order; this one did not, and play-testing found it.
             broadcast(bot, new ClientboundPlayerInfoUpdatePacket(
                     ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER, bot));
+            level.addFreshEntity(bot);
         }
 
         render(bot);

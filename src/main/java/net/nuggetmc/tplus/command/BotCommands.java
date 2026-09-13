@@ -535,9 +535,30 @@ public final class BotCommands {
                                 + " / " + BotMath.round1Dec(bot.getBotMaxHealth())
                         + "\n  Alive ticks: " + bot.getAliveTicks()
                         + "\n  Kills: " + bot.getKills()
-                        + "\n  In player list: " + bot.isInPlayerList())
+                        + "\n  In player list: " + bot.isInPlayerList()
+                        + "\n  Skin: " + describeSkin(bot))
                         .withStyle(ChatFormatting.RESET)), false);
         return 1;
+    }
+
+    /**
+     * Whether a bot's profile carries a texture, and whether it is signed.
+     *
+     * <p>Added while chasing skins that never rendered. A bot showing "none" never got one from
+     * Mojang; one showing "signed" has a texture a modern client will reject, because the
+     * signature is bound to the original account's profile id and a bot's id is fresh.
+     */
+    private static String describeSkin(Bot bot) {
+        var textures = bot.getGameProfile().properties().get("textures");
+
+        if (textures.isEmpty()) {
+            return "none";
+        }
+
+        var property = textures.iterator().next();
+
+        return (property.signature() == null ? "unsigned" : "signed")
+                + ", " + property.value().length() + " chars";
     }
 
     /**
