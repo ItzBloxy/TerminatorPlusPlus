@@ -1,6 +1,7 @@
 package net.nuggetmc.tplus.bot;
 
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
@@ -120,6 +121,52 @@ class EquipmentTierTest {
         // what pins it.
         assertEquals(List.of(Items.IRON_PICKAXE, Items.IRON_AXE, Items.IRON_SHOVEL),
                 EquipmentTier.IRON.tools());
+    }
+
+    @Test
+    void everyToolBearingTierCarriesShearsAfterItsOwnThree() {
+        // Shears are the fourth candidate Mining.optimalTool considers, and they are untiered:
+        // vanilla has exactly one pair, so they are appended here rather than repeated seven
+        // times in the table. Order is pinned because it decides ties -- a wooden axe and shears
+        // both score 2.0 on glow lichen, and the axe holds the slot only by going first.
+        for (EquipmentTier tier : EquipmentTier.values()) {
+            if (tier.tools().isEmpty()) {
+                continue;
+            }
+
+            List<Item> mining = tier.miningTools();
+
+            assertEquals(tier.tools().size() + 1, mining.size(), tier.id() + " mining tools");
+            assertEquals(tier.tools(), mining.subList(0, tier.tools().size()),
+                    tier.id() + " must keep its own three first, in order");
+            assertSame(Items.SHEARS, mining.get(mining.size() - 1),
+                    tier.id() + " must end with shears");
+        }
+
+        // A concrete anchor next to the loop, so a reader sees the shape without deriving it.
+        assertEquals(List.of(Items.IRON_PICKAXE, Items.IRON_AXE, Items.IRON_SHOVEL, Items.SHEARS),
+                EquipmentTier.IRON.miningTools());
+    }
+
+    @Test
+    void aTierWithNoToolsMinesWithNothing() {
+        // Not [SHEARS]: a tier with no tools already mines bare-handed and this keeps it that
+        // way. The commands cannot reach these three -- asToolTier floors NONE to WOOD, and the
+        // tools slot rejects leather and chain -- but setToolTier applies only that one floor,
+        // so a caller can still get here.
+        assertEquals(List.of(), EquipmentTier.NONE.miningTools());
+        assertEquals(List.of(), EquipmentTier.LEATHER.miningTools());
+        assertEquals(List.of(), EquipmentTier.CHAIN.miningTools());
+    }
+
+    @Test
+    void toolsAndMiningToolsAgreeOnWhetherThereAreAnyTools() {
+        // The one invariant tying the two accessors together: adding shears must never turn a
+        // tier that mines with nothing into a tier that mines with something.
+        for (EquipmentTier tier : EquipmentTier.values()) {
+            assertEquals(tier.tools().isEmpty(), tier.miningTools().isEmpty(),
+                    tier.id() + " must agree with itself");
+        }
     }
 
     @Test

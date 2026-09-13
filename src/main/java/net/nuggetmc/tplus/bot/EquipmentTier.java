@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * What a bot wears and what it mines with.
@@ -84,10 +85,18 @@ public enum EquipmentTier {
 
     private final Item[] armor;
     private final Item[] tools;
+    private final List<Item> miningTools;
 
     EquipmentTier(Item[] armor, Item[] tools) {
         this.armor = armor;
         this.tools = tools;
+
+        // Built once per constant rather than rebuilt per call. Safe in an enum constructor for
+        // the same reason the WOODEN_PICKAXE above it is: Items.SHEARS is an Item constant, and
+        // the "Components not bound yet" trap is `new ItemStack`, which this is not.
+        this.miningTools = tools.length == 0
+                ? List.of()
+                : Stream.concat(Arrays.stream(tools), Stream.of(Items.SHEARS)).toList();
     }
 
     /** @return the tier with this name, case-insensitively, or null. */
@@ -138,6 +147,30 @@ public enum EquipmentTier {
     /** Pickaxe, axe, shovel. Empty for a tier with no tools and for {@link #NONE}. */
     public List<Item> tools() {
         return List.of(tools);
+    }
+
+    /**
+     * Everything a bot on this tier may mine with: {@link #tools()} followed by shears.
+     *
+     * <p>Shears are <b>untiered</b>, so they are not in the table. Vanilla has exactly one pair
+     * — no wooden shears and no netherite shears — and their speed comes from a {@code Tool}
+     * data component built by {@code ShearsItem.createToolProperties} rather than from a
+     * {@code ToolMaterial}: 15.0 on {@code #minecraft:leaves} and cobweb, 5.0 on
+     * {@code #minecraft:wool}, 2.0 on glow lichen and vine, 1.0 on everything else.
+     *
+     * <p>That 1.0 is why adding them cannot regress anything. {@code Mining.optimalTool} starts
+     * at 1 and replaces only on strictly greater, so shears win exactly where a pickaxe, axe and
+     * shovel all score 1.0 too, and nowhere else.
+     *
+     * <p>Empty when {@link #tools()} is empty, so {@link #NONE}, {@link #LEATHER} and
+     * {@link #CHAIN} yield nothing rather than a nonsensical shears-only set. That is today's
+     * behaviour preserved, not a new rule: a tier with no tools already mines bare-handed. The
+     * commands cannot reach the case — {@link #asToolTier()} floors NONE to WOOD and the tools
+     * slot rejects the other two — but {@code Bot.setToolTier} applies only that one floor, so a
+     * caller can still get there.
+     */
+    public List<Item> miningTools() {
+        return miningTools;
     }
 
     /**
