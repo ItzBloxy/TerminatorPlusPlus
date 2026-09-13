@@ -7,6 +7,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.nuggetmc.tplus.agent.legacy.BlockRules;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
@@ -18,26 +19,19 @@ import java.util.List;
  * <p>Ported from {@code Bot.checkStandingOn}, which gated on a hand-maintained Material
  * list: {@code LegacyMats.isSolid(mat) || LegacyMats.canStandOn(mat)}.
  *
- * <h2>Which shape counts as ground</h2>
+ * <h2>Which blocks count as ground</h2>
  *
- * <p>This is an approximation of that list, and the choice of shape matters. Measured in
- * 26.2, these blocks have an <em>empty collision</em> shape but a non-empty outline:
- * vines, snow layers, short and tall grass, poppies, torches, rails, pressure plates,
- * cobwebs, powder snow, and sweet berry bushes.
+ * <p>Plan A had no {@code BlockRules} to call, and approximated the list with "has a non-empty
+ * collision shape". That was measured against the alternative at the time: these blocks have an
+ * empty collision shape but a non-empty <em>outline</em> — vines, snow layers, short and tall
+ * grass, poppies, torches, rails, pressure plates, cobwebs, powder snow and sweet berry bushes —
+ * and only vines and snow layers are in upstream's {@code canStandOn}, so keying off the outline
+ * would have bought two right blocks for eleven wrong ones.
  *
- * <p>Only vines and snow layers are in upstream's {@code canStandOn}. So keying off the
- * outline shape would make a bot treat grass, flowers and torches as solid ground —
- * eleven wrong blocks to buy two right ones. Collision shape is the better proxy, with
- * the two genuine exceptions handled explicitly below.
- *
- * <p>Neither proxy is exactly the original. Getting it right needs the curated predicate
- * ported as {@code BlockRules} (spec section 4.2), which lands with the agent in Plan B;
- * until then this is deliberately the less wrong of the two.
- *
- * <p>An empty shape is skipped, which also matches Bukkit returning an empty BoundingBox
- * that overlaps nothing — and is mandatory, because {@code VoxelShape.bounds()} throws on
- * an empty shape.
- *
+ * <p>{@code BlockRules} exists now, so the approximation is gone: the predicate below is
+ * upstream's {@code isSolid || canStandOn}. The shape is still consulted, but only to find the
+ * box, not to decide membership.
+ *</p>
  * <p>Tag membership needs a loaded datapack, so this class is covered by the GameTests
  * rather than pure unit tests (spec section 6).
  */
@@ -130,20 +124,31 @@ public final class GroundCheck {
     /**
      * The box a bot can rest on, in world coordinates, or null when there is none.
      *
-     * <p>Collision shape: what can physically hold an entity up.
+     * <p>The predicate is upstream's exactly, now that {@code BlockRules} exists: a block is
+     * footing if it is solid, or if it is one of the non-solid blocks that still holds an entity
+     * up. Plan A approximated this with "has a non-empty collision shape" and recorded the real
+     * one as owed here.
      *
-     * <p>{@code VoxelShape.bounds()} throws on an empty shape, so the emptiness check is
-     * mandatory, not defensive.
+     * <p>{@code VoxelShape.bounds()} throws on an empty shape, so that check is mandatory rather
+     * than defensive — it is what crashed the server before Plan A caught it.
      */
     private static AABB standableBox(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
-        if (state.isAir()) {
+
+        if (!BlockRules.isSolid(state) && !BlockRules.canStandOn(state)) {
             return null;
         }
 
         VoxelShape shape = state.getCollisionShape(level, pos);
+
         if (shape.isEmpty()) {
-            return null;
+            // canStandOn admits blocks with no collision shape at all — a carpet, a lily pad, a
+            // candle. Upstream used Bukkit's Block.getBoundingBox(), which for those returns a
+            // zero-height box at the block's base, and that is what this reproduces. Returning
+            // null instead would mean a bot never stands on a carpet, which canStandOn
+            // explicitly allows.
+            return new AABB(pos.getX(), pos.getY(), pos.getZ(),
+                    pos.getX() + 1, pos.getY(), pos.getZ() + 1);
         }
 
         return shape.bounds().move(pos);
