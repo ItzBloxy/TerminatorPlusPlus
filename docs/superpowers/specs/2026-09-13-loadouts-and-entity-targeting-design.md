@@ -2,10 +2,10 @@
 
 Two features upstream never had, both taken from the first real play-test. Neither is a translation,
 so neither is covered by the port spec
-(`2026-09-12-terminatorplus-neoforge-port-design.md`); this document is what stands in for `master`
-when there is no `master` to check against.
+(`2026-09-12-terminatorplus-neoforge-port-design.md`); this document is what stands in for `paper-original`
+when there is no `paper-original` to check against.
 
-**Branch:** `neoforge-port`. **Stack:** Java 25, NeoForge 26.2.0.87, Minecraft 26.2, Brigadier,
+**Branch:** `master` (called `neoforge-port` until Plan D). **Stack:** Java 25, NeoForge 26.2.0.87, Minecraft 26.2, Brigadier,
 JUnit 6.1.3, NeoForge `testframework`.
 
 **Backlog items closed:** *Loadouts* (in full) and *Targeting a specific entity* (in full). Both are

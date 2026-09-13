@@ -12,13 +12,18 @@ deviation register (see *Docs* below) — if you change behaviour, add an entry.
 
 | Branch | What it is |
 |---|---|
-| `master` | The original Paper 1.21.1 plugin. **Never modify.** This is the faithfulness oracle |
-| `neoforge-port` | All port work |
+| `master` | The NeoForge port. All work lands here |
+| `paper-original` | The original Paper 1.21.1 plugin, tracking `origin/master` upstream. **Never modify.** This is the faithfulness oracle |
 
-Read any original with `git show master:<path>` — do this constantly, not occasionally.
+The two branches share history — `master` descends from `paper-original` — so the original of any
+file is one command away. Read it with `git show paper-original:<path>`, and do that constantly
+rather than occasionally.
+
+**The oracle was called `master` until Plan D**, when the port became the project's main line.
+Anything quoting `git show master:` predates that rename and is reading the wrong branch.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java
 ```
 
 ## Commands

@@ -17,19 +17,19 @@ Brigadier, JUnit 6.1.3, NeoForge `testframework` + GameTests.
 ---
 
 **Spec:** `docs/superpowers/specs/2026-09-13-loadouts-and-entity-targeting-design.md`. These are
-features upstream never had, so that spec stands in for `master` — there is nothing to diff against.
+features upstream never had, so that spec stands in for `paper-original` — there is nothing to diff against.
 
 **Plans A, B and C:** complete. **Plan B's deviation register is the one this plan extends**
 (`docs/superpowers/plans/2026-09-12-neoforge-port-b-agent.md`, currently numbered to 21). Do not
 start a new list.
 
-**Branch:** `neoforge-port`. The Paper 1.21.1 source is on `master`. Two of these tasks *do* touch
+**Branch:** `master` (called `neoforge-port` until Plan D). The Paper 1.21.1 source is on `paper-original`. Two of these tasks *do* touch
 ported code — `Mining.TOOLS`, `TargetGoal`, `playertarget` — and for those the original is still the
 reference for what you are changing away from:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/LegacyItems.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/EnumTargetGoal.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyItems.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/EnumTargetGoal.java
 ```
 
 **Verify every vanilla signature against the patched jar**, not a Paper jar:

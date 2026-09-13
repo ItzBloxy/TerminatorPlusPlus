@@ -10,8 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-12-terminatorplus-neoforge-port-design.md`
 
-**Branch:** `neoforge-port`. The Paper 1.21.1 source stays on `master`. Read any original with
-`git show master:<path>` — this is the faithfulness oracle and you should use it constantly.
+**Branch:** `master` (called `neoforge-port` until Plan D). The Paper 1.21.1 source stays on `paper-original`. Read any original with
+`git show paper-original:<path>` — this is the faithfulness oracle and you should use it constantly.
 
 **Scope:** This is Plan A of two. A bot produced by Plan A stands still.
 
@@ -79,7 +79,7 @@ Files created by this plan. One responsibility each; nothing here exceeds ~450 l
 ## Task 1: NeoForge project scaffold
 
 The old Bukkit tree cannot compile under ModDevGradle, so it is removed here. **It is safe: every
-deleted file is intact on `master`** and this plan quotes `git show master:...` whenever it needs one.
+deleted file is intact on `master`** and this plan quotes `git show paper-original:...` whenever it needs one.
 
 **Files:**
 - Delete: `TerminatorPlus-API/`, `TerminatorPlus-Plugin/`, `buildSrc/`, `src/`, `build.gradle.kts`, `settings.gradle.kts`
@@ -600,7 +600,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 3: BotMath
 
 Port of the v1-relevant half of `MathUtils`. Read the original first:
-`git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/MathUtils.java`
+`git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/MathUtils.java`
 
 The neural-network helpers (`generateConnectionValue`, `getBounds`, `getMutationSize`,
 `distribution`, `sum`, `min`, `max`, `getMidValue`, `sortByValue`) are **deferred to a later plan** —
@@ -713,7 +713,7 @@ import java.util.Set;
 
 /**
  * Vector and angle helpers. Ported from the Paper build's {@code MathUtils}; see
- * {@code git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/MathUtils.java}.
+ * {@code git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/MathUtils.java}.
  *
  * <p>Bukkit's {@code NumberConversions.isFinite} was verified equivalent to
  * {@link Double#isFinite}, so the JDK method is used here.
@@ -1110,9 +1110,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Create: `src/main/java/net/nuggetmc/tplus/util/MojangSkins.java`
 
 Originals for reference:
-- `git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/nms/MockConnection.java`
-- `git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/CustomGameProfile.java`
-- `git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/MojangAPI.java`
+- `git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/nms/MockConnection.java`
+- `git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/CustomGameProfile.java`
+- `git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/MojangAPI.java`
 
 - [ ] **Step 1: Write `BotConnection`**
 
@@ -1353,7 +1353,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 The milestone that proves the whole approach. After this task a bot appears in the world.
 
-Original: `git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java`
+Original: `git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java`
 
 **Files:**
 - Create: `src/main/java/net/nuggetmc/tplus/bot/Bot.java`
@@ -1661,7 +1661,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 The velocity integration lifted out of `Bot.updateLocation`, `checkGround`, and
 `checkStandingOn` so it can be tested without a world.
 
-Original: `git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java`
+Original: `git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java`
 (see `updateLocation` and `addFriction`).
 
 **Files:**
@@ -2496,7 +2496,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 Replaces the Paper build's ~370-line reflection-and-annotation command framework.
 
-Original: `git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/command/commands/BotCommand.java`
+Original: `git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/command/commands/BotCommand.java`
 
 **Files:**
 - Create: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java`

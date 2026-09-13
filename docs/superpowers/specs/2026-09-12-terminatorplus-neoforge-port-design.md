@@ -167,7 +167,7 @@ boundary. This keeps the translation genuinely line-for-line and reduces 102 sil
 ### 3.1 Repository
 
 Work happens on branch `neoforge-port`, cut from `master`. **The 1.21.1 Bukkit source stays on
-`master` as the reference for every translated file.** `git show master:<path>` is the diff oracle
+`master` as the reference for every translated file.** `git show paper-original:<path>` is the diff oracle
 for faithfulness, and this is the primary defense against behavior drift.
 
 The upstream project is EPL-2.0. This port is a derivative work: it remains under EPL-2.0 and
@@ -412,7 +412,7 @@ For each ported file:
 3. Preserve control flow, magic numbers, and ordering exactly. Known bugs stay — `Bot.push()` has a
    copy-paste error using `getX()` and `getZ()` for both axes, and it is ported as-is. Fixing it is a
    separate, deliberate change with its own before-and-after test.
-4. Diff the result against `git show master:<path>` and confirm every difference is an intended type
+4. Diff the result against `git show paper-original:<path>` and confirm every difference is an intended type
    translation.
 
 ## 6. Testing

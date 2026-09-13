@@ -20,8 +20,8 @@ JUnit 6.1.3, NeoForge `testframework` + GameTests.
 **Plan A:** `docs/superpowers/plans/2026-09-12-neoforge-port-a-foundation.md` — complete, on this
 branch as of `3302430`.
 
-**Branch:** `neoforge-port`. The Paper 1.21.1 source stays on `master`. Read any original with
-`git show master:<path>` — this is the faithfulness oracle and you should use it constantly.
+**Branch:** `master` (called `neoforge-port` until Plan D). The Paper 1.21.1 source stays on `paper-original`. Read any original with
+`git show paper-original:<path>` — this is the faithfulness oracle and you should use it constantly.
 
 **Reference the patched jar, not a Paper jar.** Verify every vanilla signature against
 `build/moddev/artifacts/minecraft-patched-26.2.0.87-sources.jar`. During Plan A, checking APIs
@@ -374,9 +374,9 @@ will need it in Phase 7.
 Read the originals first:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/BotUtils.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/ItemUtils.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/DebugLogUtils.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/BotUtils.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/ItemUtils.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/utils/DebugLogUtils.java
 ```
 
 - [ ] **Step 1: Write the failing pure test for `BotUtils`**
@@ -845,7 +845,7 @@ tag.
 Read the original first — all four are in one block:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '766,806p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '766,806p'
 ```
 
 - [ ] **Step 1: Write the failing GameTests**
@@ -1083,7 +1083,7 @@ Six methods, one of which is deliberately empty. `registerPose` is **commented o
 upstream — read it and see:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '860,890p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '860,890p'
 ```
 
 Both statements in its body are `//`-prefixed, so it has always been a no-op, and the pose a client
@@ -1344,7 +1344,7 @@ it, which is the whole design. The two accessors therefore differ, and the diffe
 Read the originals:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '228,266p;396,436p;478,520p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '228,266p;396,436p;478,520p'
 ```
 
 - [ ] **Step 1: Write the failing GameTests**
@@ -1741,7 +1741,7 @@ of a bot and make it look at you, crouch, swing, hold a pickaxe and place a bloc
 Read the original:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '808,830p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '808,830p'
 ```
 
 - [ ] **Step 1: Write the failing GameTests**
@@ -2290,8 +2290,8 @@ bag of twelve mutable collections that spec §4.3 says to move wholesale rather 
 Read both originals:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/Agent.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '36,62p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/Agent.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '36,62p'
 ```
 
 **Files:**
@@ -2800,7 +2800,7 @@ sound, knockback, and the kill credit.
 Read the original:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '694,760p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '694,760p'
 ```
 
 **Files:**
@@ -3556,9 +3556,9 @@ unconfigured list.
 Read the originals:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/EnumTargetGoal.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/CustomListMode.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '1402,1600p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/EnumTargetGoal.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/CustomListMode.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '1402,1600p'
 ```
 
 **Files:**
@@ -4100,9 +4100,9 @@ milestone three tasks later for two constants. Task 13's first step is to re-rea
 Read the originals:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '25,45p;81,88p'
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyUtils.java
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyWorldManager.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '25,45p;81,88p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyUtils.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyWorldManager.java
 ```
 
 **Files:**
@@ -4455,8 +4455,8 @@ The milestone. Read `tickBot` and `move` in full before writing anything — the
 in `tickBot` is the specification for the whole rest of this plan:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '74,210p'
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '208,300p;380,420p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '74,210p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '208,300p;380,420p'
 ```
 
 ### The `tickBot` order, written out once
@@ -5374,8 +5374,8 @@ Read the whole original before touching anything. The sets are in the first 240 
 predicates after:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '23,240p'
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '256,282p;480,489p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '23,240p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '256,282p;480,489p'
 cat src/main/java/net/nuggetmc/tplus/agent/legacy/BlockRules.java
 ```
 
@@ -5810,7 +5810,7 @@ Read Plan A's version and the original side by side:
 
 ```bash
 sed -n '40,90p' src/main/java/net/nuggetmc/tplus/motion/GroundCheck.java
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '529,590p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '529,590p'
 ```
 
 Change the filter in `standableBox` to the real predicate:
@@ -5876,8 +5876,8 @@ fall and one that splatters.
 Read all four originals in full:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '283,479p'
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '330,410p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyMats.java | sed -n '283,479p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '330,410p'
 ```
 
 **Files:**
@@ -6554,7 +6554,7 @@ constants.
 Read the original:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyLevel.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyLevel.java
 ```
 
 **Files:**
@@ -6907,8 +6907,8 @@ animation stops when the bot stops mining, the progress stops when the target bl
 Read the originals:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '985,1070p'
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '980,1010p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '985,1070p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '980,1010p'
 ```
 
 - [ ] **Step 1: Write the failing `runRepeating` tests**
@@ -7410,7 +7410,7 @@ code is so bad lmao".
 Read it twice before writing:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '1070,1190p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '1070,1190p'
 ```
 
 **Files:**
@@ -7662,7 +7662,7 @@ about to mine out from under itself; `placeWaterDown` is the fire-extinguishing 
 `BotBehaviors` will call in Task 22.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '444,465p;944,985p;1190,1215p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '444,465p;944,985p;1190,1215p'
 ```
 
 **Files:**
@@ -7809,7 +7809,7 @@ The two vertical navigation checks. `checkDown` digs toward a target below; `che
 one above — the pillar-jumping behaviour that makes the bots recognisable.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '766,944p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '766,944p'
 ```
 
 **Files:**
@@ -7885,7 +7885,7 @@ This is the "place a block, and shore up whatever it needs to rest on" routine �
 neighbour tests that decide whether to place one block or two, and in which order.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyBlockCheck.java | sed -n '33,145p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyBlockCheck.java | sed -n '33,145p'
 ```
 
 ```java
@@ -8338,7 +8338,7 @@ naming it, having already started the break.
 Read it in full, twice. It is worth the time:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '486,765p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '486,765p'
 ```
 
 ### The decision this task turns on
@@ -8363,9 +8363,9 @@ divergence is the behaviour.
 To find out before writing: diff the arms against each other.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java \
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java \
   | sed -n '556,596p' | sed 's/NORTH/DIR/g; s/-1)/OFF)/g' > /tmp/arm-north.txt
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java \
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java \
   | sed -n '597,637p' | sed 's/SOUTH/DIR/g; s/ 1)/OFF)/g' > /tmp/arm-south.txt
 diff /tmp/arm-north.txt /tmp/arm-south.txt
 ```
@@ -8960,7 +8960,7 @@ Twenty lines, and the last piece of `tickBot`'s grounded branch. It turns a `Sur
 into the three-valued code the `switch` reads.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '465,486p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '465,486p'
 ```
 
 **Files:**
@@ -9065,7 +9065,7 @@ over water, and the boat trick that carries a bot across a lava lake. Plus `onBo
 `towerList` reset that belongs in `tickBot`.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '1215,1395p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java | sed -n '1215,1395p'
 ```
 
 **Files:**
@@ -9416,7 +9416,7 @@ bot is still falling and places cobblestone below it speculatively; `clutch` fir
 standing over a two-block drop and seals it.
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyBlockCheck.java | sed -n '147,287p'
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyBlockCheck.java | sed -n '147,287p'
 ```
 
 **Files:**
@@ -9888,7 +9888,7 @@ The last thing, and the one Plan A found most defects with. For each translated 
 port against the original by eye:
 
 ```bash
-git show master:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java > /tmp/legacy-agent.java
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java > /tmp/legacy-agent.java
 ```
 
 Work through `/tmp/legacy-agent.java` top to bottom and, for each method, find its new home and
@@ -10062,7 +10062,7 @@ operator than an explicit argument. Recorded as a shape change, not an omission.
 Read the originals:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/command/commands/BotCommand.java | sed -n '129,300p;336,420p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/command/commands/BotCommand.java | sed -n '129,300p;336,420p'
 ```
 
 **Files:**

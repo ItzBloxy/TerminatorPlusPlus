@@ -30,11 +30,11 @@ around it.
 **Plan B:** `docs/superpowers/plans/2026-09-12-neoforge-port-b-agent.md` — complete as of `f946823`.
 Its deviation register is the one this plan extends; do not start a new list.
 
-**Branch:** `neoforge-port`. The Paper 1.21.1 source stays on `master`. Read the original with
-`git show master:<path>` — this is the faithfulness oracle and you should use it constantly.
+**Branch:** `master` (called `neoforge-port` until Plan D). The Paper 1.21.1 source stays on `paper-original`. Read the original with
+`git show paper-original:<path>` — this is the faithfulness oracle and you should use it constantly.
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/command/commands/BotEnvironmentCommand.java
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/command/commands/BotEnvironmentCommand.java
 ```
 
 **Reference the patched jar, not a Paper jar.** Verify every vanilla signature against
@@ -133,7 +133,7 @@ Upstream calls `LegacyMats.isSolid` from five places. Four of them are ported th
 `BlockRules.isSolid`. The fifth is not:
 
 ```bash
-git show master:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '810,827p'
+git show paper-original:TerminatorPlus-Plugin/src/main/java/net/nuggetmc/tplus/bot/Bot.java | sed -n '810,827p'
 grep -n "isSolid" src/main/java/net/nuggetmc/tplus/bot/Bot.java
 ```
 
