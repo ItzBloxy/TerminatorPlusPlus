@@ -15,18 +15,22 @@ import net.minecraft.commands.Commands;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.ResourceArgument;
+import net.minecraft.commands.arguments.ResourceOrTagArgument;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -42,6 +46,7 @@ import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.bot.EnemyTarget;
 import net.nuggetmc.tplus.bot.EquipmentTier;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.MotionVec;
@@ -49,8 +54,12 @@ import net.nuggetmc.tplus.util.MojangSkins;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
 
@@ -244,6 +253,23 @@ public final class BotCommands {
         root.then(Commands.literal("playertarget")
                 .then(Commands.argument("player", EntityArgument.player())
                         .executes(BotCommands::setPlayerTarget)));
+
+        // Two modes rather than one command that guesses. `generic` is live and by type, so a
+        // zombie that spawns later is hunted too; `specific` is fixed and by entity, so it is
+        // not. The mode is stated because the two answer the same question opposite ways, and
+        // inferring it from how many entities a selector happened to match would make the same
+        // command mean different things depending on what was standing around.
+        root.then(Commands.literal("enemytarget")
+                .executes(BotCommands::showEnemyTarget)
+                .then(Commands.literal("clear")
+                        .executes(BotCommands::clearEnemyTarget))
+                .then(Commands.literal("generic")
+                        .then(Commands.argument("type", ResourceOrTagArgument.resourceOrTag(
+                                        event.getBuildContext(), Registries.ENTITY_TYPE))
+                                .executes(BotCommands::enemyTargetGeneric)))
+                .then(Commands.literal("specific")
+                        .then(Commands.argument("targets", EntityArgument.entities())
+                                .executes(BotCommands::enemyTargetSpecific))));
 
         root.then(Commands.literal("give")
                 .then(Commands.argument("item", ItemArgument.item(event.getBuildContext()))
@@ -534,23 +560,162 @@ public final class BotCommands {
     }
 
     /**
-     * Points every live bot at one player.
+     * Points every live bot at one player and selects the PLAYER goal.
      *
-     * <p>Ported from {@code settings playertarget}. Upstream's message said it plainly and it is
-     * worth repeating to the operator: the PLAYER goal has to be selected separately, or this
-     * changes nothing.
+     * <p>Ported from {@code settings playertarget}. <b>Divergence:</b> upstream set the target and
+     * then told the operator to go and set the goal themselves. Doing it here makes the two
+     * targeting commands behave alike, which matters more than keeping upstream's message — two
+     * adjacent commands that differ on whether they finish the job are worse than one command
+     * that differs from upstream.
      */
     private static int setPlayerTarget(CommandContext<CommandSourceStack> ctx)
             throws CommandSyntaxException {
+        if (!(TerminatorPlus.registry().agent() instanceof LegacyAgent agent)) {
+            ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
+            return 0;
+        }
+
         ServerPlayer player = EntityArgument.getPlayer(ctx, "player");
 
         for (Bot bot : TerminatorPlus.registry().bots()) {
             bot.setTargetPlayer(player.getUUID());
         }
 
+        agent.targeting().setTargetType(TargetGoal.PLAYER);
+
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "All bots now target " + player.getGameProfile().name()
-                        + ". Set the goal to 'player' for this to take effect."), true);
+                        + ". Goal set to PLAYER."), true);
+        return 1;
+    }
+
+    /**
+     * Points every live bot at a type or a tag, live.
+     *
+     * <p>{@code ResourceOrTagArgument} is what makes {@code #minecraft:raiders} work alongside
+     * {@code zombie}, and it is why this command needs no add/remove/list family of its own.
+     */
+    private static int enemyTargetGeneric(CommandContext<CommandSourceStack> ctx)
+            throws CommandSyntaxException {
+        ResourceOrTagArgument.Result<EntityType<?>> result =
+                ResourceOrTagArgument.getResourceOrTag(ctx, "type", Registries.ENTITY_TYPE);
+
+        // Expanded to concrete types here rather than kept as the Predicate the Result already
+        // is: an expanded set can be reported by /tplus enemytarget and tested without a world,
+        // and a tag only changes on a datapack reload anyway.
+        Set<EntityType<?>> types = result.unwrap().map(
+                ref -> Set.<EntityType<?>>of(ref.value()),
+                tag -> tag.stream().map(Holder::value).collect(Collectors.toUnmodifiableSet()));
+
+        if (types.isEmpty()) {
+            // An empty tag would set a target that silently matches nothing, which is the failure
+            // mode this whole command exists to avoid.
+            ctx.getSource().sendFailure(Component.literal(
+                    result.asPrintable() + " is empty, so nothing would be targeted."));
+            return 0;
+        }
+
+        String label = result.asPrintable()
+                + (types.size() > 1 ? " (" + types.size() + " types)" : "");
+
+        return applyEnemyTarget(ctx, EnemyTarget.ofTypes(types, label));
+    }
+
+    /**
+     * Points every live bot at the entities a selector matched, right now.
+     *
+     * <p>{@code limit=1} and a bare UUID are the same mechanism with a set of one.
+     */
+    private static int enemyTargetSpecific(CommandContext<CommandSourceStack> ctx)
+            throws CommandSyntaxException {
+        Collection<? extends Entity> selected = EntityArgument.getEntities(ctx, "targets");
+
+        // locateTarget returns a LivingEntity and @e matches boats and item frames. Filtering here
+        // rather than at scan time means the operator is told, instead of watching a successful
+        // command do nothing.
+        List<? extends Entity> living =
+                selected.stream().filter(e -> e instanceof LivingEntity).toList();
+
+        if (living.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "None of the " + selected.size() + " selected entities can be targeted."));
+            return 0;
+        }
+
+        int ignored = selected.size() - living.size();
+
+        if (ignored > 0) {
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "Ignored " + ignored + " selected entities that cannot be targeted."), false);
+        }
+
+        Set<UUID> ids = living.stream().map(Entity::getUUID).collect(Collectors.toUnmodifiableSet());
+        String types = living.stream()
+                .map(e -> EntityType.getKey(e.getType()).getPath())
+                .distinct().sorted().collect(Collectors.joining(", "));
+
+        return applyEnemyTarget(ctx, EnemyTarget.ofEntities(ids,
+                living.size() + " entities (" + types + ")"));
+    }
+
+    /** Sets the target on every bot and switches the goal to match. */
+    private static int applyEnemyTarget(CommandContext<CommandSourceStack> ctx, EnemyTarget target) {
+        if (!(TerminatorPlus.registry().agent() instanceof LegacyAgent agent)) {
+            ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
+            return 0;
+        }
+
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+        bots.forEach(bot -> bot.setEnemyTarget(target));
+        agent.targeting().setTargetType(TargetGoal.ENTITY);
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Now hunting " + target.label() + " for " + bots.size()
+                        + " bot(s). Goal set to ENTITY."), true);
+        return 1;
+    }
+
+    /**
+     * Reports the enemy target, grouped by label.
+     *
+     * <p>Grouped rather than assumed uniform on purpose: a bot created after the command carries
+     * {@code EnemyTarget.NONE}, the same gap {@code /tplus playertarget} has, and this is where an
+     * operator finds out — "3 x minecraft:zombie" beside "2 x nothing".
+     */
+    private static int showEnemyTarget(CommandContext<CommandSourceStack> ctx) {
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+
+        if (bots.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal("No bots are loaded."), false);
+            return 0;
+        }
+
+        Map<String, Integer> counts = new TreeMap<>();
+
+        for (Bot bot : bots) {
+            counts.merge(bot.getEnemyTarget().label(), 1, Integer::sum);
+        }
+
+        String summary = counts.entrySet().stream()
+                .map(e -> e.getValue() + " x " + e.getKey())
+                .collect(Collectors.joining("\n  "));
+
+        ctx.getSource().sendSuccess(() -> Component.literal("Enemy target:\n  " + summary), false);
+        return 1;
+    }
+
+    /** Clears the enemy target, leaving the goal alone. */
+    private static int clearEnemyTarget(CommandContext<CommandSourceStack> ctx) {
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+        bots.forEach(bot -> bot.setEnemyTarget(EnemyTarget.NONE));
+
+        // The goal is deliberately not put back. Setting a target has one right answer for the
+        // goal; clearing one does not, and silently re-aiming every bot at the nearest player as a
+        // side effect of a clear is worse than a goal that finds nothing until /tplus goal says
+        // otherwise.
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Cleared the enemy target for " + bots.size()
+                        + " bot(s). The goal is unchanged."), true);
         return 1;
     }
 
