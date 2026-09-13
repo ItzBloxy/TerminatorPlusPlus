@@ -1,54 +1,130 @@
-# TerminatorPlusPlus
+<div align="center">
 
-Server-side player bots for **Minecraft 26.2**, as a **NeoForge** mod. They hunt a target, mine
-through walls, tower, clutch out of falls, bridge over lava and fight back.
+# TerminatorPlus++
 
-This is a port of [TerminatorPlus](https://github.com/HorseNuggets/TerminatorPlus), a Paper plugin
-whose upstream development paused on 1.21.1. It is **not a successor and not a replacement** — it is
-another option, for anyone who wants a version that runs on a current Minecraft. The original is
-still the original; this owes it everything, including most of its method bodies.
+**Server-side player bots for Minecraft 26.2, as a NeoForge mod.**
+
+They hunt a target, mine through walls, tower, clutch out of falls, bridge over lava and fight back.
+
+[![Minecraft](https://img.shields.io/badge/Minecraft-26.2-52A535?style=flat-square)](https://www.minecraft.net)
+[![NeoForge](https://img.shields.io/badge/NeoForge-26.2.0.87-F16436?style=flat-square)](https://neoforged.net)
+[![Java](https://img.shields.io/badge/Java-25-E76F00?style=flat-square&logo=openjdk&logoColor=white)](https://adoptium.net)
+[![Gradle](https://img.shields.io/badge/Gradle-9.2.1-02303A?style=flat-square&logo=gradle&logoColor=white)](https://gradle.org)
+[![Version](https://img.shields.io/badge/version-5.0.0--ALPHA-DFB317?style=flat-square)](#status)
+[![Licence](https://img.shields.io/badge/licence-EPL--2.0-0A7BBB?style=flat-square)](LICENSE)
+
+**Vanilla clients connect.** No modpack, no resource pack, nothing on their end.
+
+</div>
+
+---
+
+This is a port of [TerminatorPlus](https://github.com/HorseNuggets/TerminatorPlus) `4.5.1-BETA`, a
+Paper plugin whose upstream development paused on 1.21.1. It is **not a successor and not a
+replacement** — it is another option, for anyone who wants a version that runs on a current
+Minecraft. The original is still the original; this owes it everything, including most of its
+method bodies.
 
 It is also a personal project. It is documented properly because that is how it gets built, not
 because there is a support commitment behind it. Expect rough edges, expect things in the roadmap
 below to be missing, and do not run it anywhere you would mind it breaking.
 
+<a id="status"></a>
+
+> [!WARNING]
 > **Status: 5.0.0-ALPHA.** The agent works and has been played against. The public API module and
-> the neural-network AI are not ported yet — see [What is not built](#what-is-not-built-yet).
+> the neural-network AI are not ported yet — see [What is not built yet](#what-is-not-built-yet).
+
+## Contents
+
+- [Install](#install)
+- [Sixty-second start](#sixty-second-start)
+- [Command reference](#command-reference)
+  - [Creating bots](#creating-bots)
+  - [Choosing a target](#choosing-a-target)
+  - [Equipment and behaviour](#equipment-and-behaviour)
+  - [Managing bots](#managing-bots)
+  - [Driving one bot by hand](#driving-one-bot-by-hand)
+  - [Telling bots about your server](#telling-bots-about-your-server)
+- [What is new here](#what-is-new-here)
+- [What is not built yet](#what-is-not-built-yet)
+- [How it is built](#how-it-is-built)
+- [Credit and licence](#credit-and-licence)
 
 ---
 
 ## Install
 
-Server-side only. **Clients connect with vanilla** — nothing to install on their end, no modpack,
-no resource pack.
+Server-side only. Clients connect with vanilla.
 
-1. A NeoForge **26.2.0.87** server.
-2. Drop `tplus-5.0.0-ALPHA.jar` into `mods/`.
-3. Start it. `/tplus` is available to operators.
+| | |
+|---|---|
+| **Server** | NeoForge **26.2.0.87** on Minecraft **26.2** |
+| **Client** | Anything. Vanilla 26.2 is fine |
+| **Permission** | `/tplus` needs permission level 2 — operators have it by default |
 
-Building it yourself needs **JDK 25**:
+1. Drop `tplus-5.0.0-ALPHA.jar` into `mods/`.
+2. Start the server.
+3. `/tplus` is available to operators.
+
+### Building it yourself
+
+Needs **JDK 25**. The Gradle wrapper fetches everything else.
 
 ```bash
-./gradlew build      # compile and run the unit tests
-./gradlew jar        # the mod jar, in build/libs/
+./gradlew build
 ```
+
+```bash
+./gradlew jar
+```
+
+`build` compiles and runs the 98 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
+
+<details>
+<summary><b>The other run tasks</b></summary>
+
+<br>
+
+| Task | What it does |
+|---|---|
+| `./gradlew runGameTestServer` | 143 in-world GameTests, headless |
+| `./gradlew runServer` | dev server, RCON on 25575 |
+| `./gradlew runClient` | dev client, for the things a person has to watch |
+
+`tools/` has an RCON client and the recipe for a **production** NeoForge server test. Read
+[`tools/README.md`](tools/README.md) first — the dev run refuses vanilla clients during network
+negotiation, so it is not representative of production.
+
+</details>
 
 ---
 
-## Using it
+## Sixty-second start
 
 ```
 /tplus create Hunter 5 none netherite diamond minecraft:bow
 ```
 
-Five bots called Hunter, in netherite armour, carrying diamond tools and a bow. Then pick
-what they hunt:
+Five bots called Hunter, in netherite armour, carrying diamond tools and a bow. Then pick what
+they hunt:
 
 ```
 /tplus goal nearestvulnerableplayer
 ```
 
-…and now they'll target you.
+…and now they'll target you. When you have had enough:
+
+```
+/tplus removeall
+```
+
+---
+
+## Command reference
+
+Everything lives under `/tplus`. Several commands report their current value when you leave the
+argument off; the tables below say which.
 
 ### Creating bots
 
@@ -56,26 +132,32 @@ what they hunt:
 /tplus create <name> [<count> [<playerlist|none> [<armor> [<tools> [<item>]]]]]
 ```
 
-Arguments fill left to right, so reaching a later one means typing the earlier ones. **`none` is the
-filler** for the two tier slots:
+Arguments fill left to right, so reaching a later one means typing the earlier ones. **`none` is
+the filler** for the two tier slots.
 
-| | |
+| Command | What you get |
 |---|---|
 | `/tplus create Bob` | one bot |
 | `/tplus create Bob 5` | five bots |
-| `/tplus create "Bot%" 5` | the `%` is where the index goes; quote it |
+| `/tplus create "Bot%" 5` | the `%` is where the index goes — `Bot1`…`Bot5`. Quote it |
 | `/tplus create Bob 5 playerlist` | also joins the real player list, so `@a` and the tab list reach them |
 | `/tplus create Bob 5 none diamond` | diamond armour |
 | `/tplus create Bob 5 none diamond netherite` | …and netherite tools |
 | `/tplus create Bob 5 none none none minecraft:trident` | just a weapon |
 
 The name is looked up on Mojang's session servers for a skin, so `/tplus create Technoblade` looks
-like Technoblade. A name nobody owns gets the default skin.
+like Technoblade. A name nobody owns gets the default skin. `count` is capped at **100** per
+command.
 
-**Tiers.** Armour takes `none, leather, chain, copper, gold, iron, diamond, netherite`. Tools take
-`none, wood, stone, copper, gold, iron, diamond, netherite`. They differ because vanilla does —
-there is no chainmail pickaxe and no wooden chestplate — and each slot rejects the other's names
-rather than silently equipping nothing.
+#### Tiers
+
+| Slot | Accepted | Omitted | `none` |
+|---|---|---|---|
+| `armor` | `none` `leather` `chain` `copper` `gold` `iron` `diamond` `netherite` | nothing equipped | nothing equipped |
+| `tools` | `none` `wood` `stone` `copper` `gold` `iron` `diamond` `netherite` | **iron** | **wood** |
+
+The two lists differ because vanilla does — there is no chainmail pickaxe and no wooden chestplate
+— and each slot rejects the other's names rather than silently equipping nothing.
 
 Omitting the tools argument gives **iron**, which is what bots have always had. Typing `none` gives
 **wood**, the floor: there is no bare-handed tier, because break speed now comes from the tool.
@@ -84,11 +166,23 @@ Omitting the tools argument gives **iron**, which is what bots have always had. 
 
 ```
 /tplus goal <goal>
+/tplus goal                     report the current goal and what it does
 ```
 
-`nearestvulnerableplayer` (the default), `nearestplayer`, `nearesthostile`, `nearestraider`,
-`nearestmob`, `nearestbot`, `nearestbotdiffer`, `nearestbotdifferalpha`, `customlist`, `player`,
-`entity`, `none`. `/tplus goal` on its own reports the current one and what it does.
+| Goal | Finds |
+|---|---|
+| `nearestvulnerableplayer` | the nearest real player in Survival or Adventure — **the default** |
+| `nearestplayer` | the nearest real player, whatever their gamemode |
+| `nearesthostile` | the nearest hostile entity |
+| `nearestraider` | the nearest raider |
+| `nearestmob` | the nearest mob |
+| `nearestbot` | the nearest bot |
+| `nearestbotdiffer` | the nearest bot with a different username |
+| `nearestbotdifferalpha` | …with a different username once non-alpha characters are stripped |
+| `customlist` | only the mob types in the custom list — see [environment](#telling-bots-about-your-server) |
+| `player` | one player, set by `playertarget` |
+| `entity` | whatever `enemytarget` set |
+| `none` | nothing |
 
 Two commands set a target **and** switch the goal for you:
 
@@ -106,33 +200,38 @@ zombies that existed when you typed it. `generic` takes tags too, so `#minecraft
 
 ```
 /tplus mobtarget <true|false>   whether bots retaliate against mobs that hit them
+/tplus mobtarget                report it
 /tplus region <from> <to> [<weightX> <weightY> <weightZ>]
 /tplus region                   report it
 /tplus region clear
 ```
 
-A region confines or biases where bots will look for targets. With all three weights at zero it is a
-hard boundary; with weights it is a preference.
+A region confines or biases where bots will look for targets. It is two block positions, and both
+blocks are covered entirely. With the weights omitted — or all three at zero — it is a hard
+boundary; with weights it is a preference. The weights come as all three or none, and each must be
+zero or more.
 
 ### Equipment and behaviour
 
-```
-/tplus armor <tier>       every bot, all four slots
-/tplus tools <tier>       every bot — this is what sets mining speed
-/tplus give <item>        every bot's default weapon
-/tplus agent <true|false> stop or start the AI entirely
-/tplus drops <true|false> whether bots drop their gear on death
-/tplus offsets <true|false>  converge on a ring around the target instead of one point
-```
+| Command | Effect | Default |
+|---|---|---|
+| `/tplus armor <tier>` | every bot, all four slots | — |
+| `/tplus tools <tier>` | every bot — **this is what sets mining speed** | iron |
+| `/tplus give <item>` | every bot's default weapon | — |
+| `/tplus agent <true\|false>` | stop or start the AI entirely | on |
+| `/tplus drops <true\|false>` | whether bots drop their gear on death | off |
+| `/tplus offsets <true\|false>` | converge on a ring around the target instead of one point | on |
+
+Those last three require their argument — there is no report form.
 
 ### Managing bots
 
-```
-/tplus list              names of every loaded bot
-/tplus info <name>       position, velocity, health, alive ticks, kills, skin state
-/tplus remove <name>
-/tplus removeall
-```
+| Command | Reports |
+|---|---|
+| `/tplus list` | names of every loaded bot |
+| `/tplus info <name>` | dimension, position, velocity, health, alive ticks, kills, player-list membership, skin state |
+| `/tplus remove <name>` | — |
+| `/tplus removeall` | — |
 
 ### Driving one bot by hand
 
@@ -151,14 +250,15 @@ hard boundary; with weights it is a preference.
 /tplus environment listsolids | clearsolids
 /tplus environment addmob <type> | removemob <type>
 /tplus environment listmobs | clearmobs
-/tplus environment moblisttype [custom|hostile|raider|mob]
+/tplus environment moblisttype [hostile|raider|mob|custom]
 ```
 
 `addsolid` is for modded blocks the bots would otherwise walk into — it tells the pathing that a
 block is real. The mob list is what the `customlist` goal hunts, and `moblisttype` decides whether
 it also widens the hostile, raider and mob goals.
 
-Neither list survives a restart. That is upstream's behaviour, kept deliberately.
+> [!NOTE]
+> Neither list survives a restart. That is upstream's behaviour, kept deliberately.
 
 ---
 
@@ -170,8 +270,13 @@ Beyond the port itself, things the Paper plugin did not have:
   one command instead of three — and two squads can differ, which they could not before.
 - **Tool tiers, per bot.** Upstream had one hardcoded iron set for everyone.
 - **Break speed follows the tool.** Upstream advanced one crack stage every two ticks, so every
-  block took twenty ticks whatever the bot held. It is now the tool's destroy speed: wood 60 ticks a
-  block, iron 20 (unchanged, by design), diamond 15, netherite 14, gold 10. Block *hardness* is
+  block took twenty ticks whatever the bot held. It is now the tool's destroy speed:
+
+  | Tier | `wood` | `stone` | `copper` | `iron` | `diamond` | `netherite` | `gold` |
+  |---|---|---|---|---|---|---|---|
+  | **Ticks per block** | 60 | 30 | 24 | **20** | 15 | 14 | 10 |
+
+  Iron is unchanged at twenty, by design, and a GameTest pins that number. Block *hardness* is
   still ignored, as upstream ignored it — obsidian costs what dirt costs.
 - **`/tplus enemytarget`.** Upstream could name one player, or a list of mob *types*. There was no
   way to say "that ender dragon".
@@ -185,32 +290,46 @@ Beyond the port itself, things the Paper plugin did not have:
 Honest about the gaps, because some of them are large. The full list with reasoning is in
 [`docs/backlog.md`](docs/backlog.md).
 
-**Not ported yet:**
+<details open>
+<summary><b>Not ported yet</b></summary>
+
+<br>
 
 - **The public API module** — `TerminatorPlusAPI`, `BotManager`, `Terminator`. Deferred on purpose
   until real internal usage could shape it. That usage now exists, so this is next.
-- **The neural-network AI** and `/tplus ai`. Around 1,000 lines; the seams where it plugs in are
-  left visible.
-- **`Debugger`**, and narrowing the shared agent state.
+- **The neural-network AI** and `/tplus ai`. Ten files, a little under 800 lines, plus the `move`
+  and `tickBot` branches that read them. The seams where it plugs in are left visible.
+- **`Debugger`** — 497 lines, and nothing else depends on it.
+- **Narrowing the shared agent state.**
 
-**Never existed, worth having:**
+</details>
+
+<details open>
+<summary><b>Never existed, worth having</b></summary>
+
+<br>
 
 - **Bots cannot use items.** Food, potions, bows and the shield all wait on one missing piece — a
   use-tick. `/tplus bot <name> shield true` puts a shield in the off-hand and it will never be
   raised — the command does not warn you, so consider this the warning.
 - **No self-preservation.** Nothing in the codebase branches on health, so bots never retreat,
-  disengage, or eat. They regenerate passively and walk into whatever is killing them.
+  disengage, or eat. They regenerate passively and walk into whatever is killing them. Armour
+  changes how long a bot lasts, not what it does.
 - **No pathfinder.** Worth saying plainly, because it explains a lot of what you will see: there is
   no graph and no cost function. A bot normalises a vector at its target, jumps, and mines whatever
   is in the way. That is why they prefer straight lines, and why one below you mines to your level
   first and then across.
+- **The MLG is a reflex, not a route.** The water clutch runs only once the game has decided a bot
+  is falling too fast, so a bot will never deliberately drop to you and clutch.
 - Bots can seal each other in when several tower in one column.
+
+</details>
 
 ---
 
 ## How it is built
 
-Two branches, sharing history:
+### Two branches, sharing history
 
 | Branch | What it is |
 |---|---|
@@ -221,13 +340,50 @@ Two branches, sharing history:
 is odd in the same way and says so in a comment — a reader who does not know that will "fix" it.
 Every deliberate divergence is written down in a register, currently 31 entries.
 
-Tested at six tiers, because each catches what the others cannot: signature checks, 98 unit tests,
-143 in-world GameTests, a server run driven over RCON, a real client, and diffing against
-`paper-original`. That last pair earns its place — a manual client session once found four bugs that
-132 GameTests and three RCON sessions all passed over.
+Because the branches share history, the original of any file is one command away:
+
+```bash
+git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/agent/legacyagent/LegacyAgent.java
+```
+
+### Six tiers of testing
+
+Each catches a class of defect the others cannot.
+
+| Tier | Catches | Blind to |
+|---|---|---|
+| Signature checks against the patched sources jar | Compile errors, 26.2 renames | Everything else |
+| **98 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
+| **143 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
+| `runServer` driven over RCON | Server-runtime crashes, command trees | Anything visual |
+| A real client | Rendering, skins, projectile collision, packet ordering | — |
+| Diffing against `paper-original` | Silent behaviour drift | — |
+
+That last pair earns its place. A manual client session once found **four** bugs that 132 GameTests
+and three RCON sessions all passed over — bots spawning in Creative and so immune to arrows, entity
+packets sent before player info, unsigned skins that render nothing, and a missing skin-layer mask.
+A green suite is not the same thing as "it works".
+
+### Repository layout
+
+```
+src/main/java/net/nuggetmc/tplus/
+├── agent/          the AI — targeting, navigation, mining, block scans
+│   └── legacy/     the ported LegacyAgent and its collaborators
+├── bot/            the bot itself, its registry, profiles and equipment tiers
+├── command/        the /tplus Brigadier tree
+├── event/          bot lifecycle events
+├── motion/         vectors, physics and ground checks
+└── util/           skins, items, scheduling, logging
+
+src/test/           the unit tests
+src/gametest/       the in-world GameTests
+docs/               the design specs, four implementation plans, and the backlog
+tools/              an RCON client, and the recipe for a production server test
+```
 
 [`CLAUDE.md`](CLAUDE.md) is the working guide: conventions, 26.2 API traps, and what each test tier
-is actually for. [`docs/`](docs) has the design spec and the four implementation plans.
+is actually for.
 
 ---
 
