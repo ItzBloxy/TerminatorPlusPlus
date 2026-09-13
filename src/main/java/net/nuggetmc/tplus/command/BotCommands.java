@@ -56,13 +56,21 @@ public final class BotCommands {
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("tplus")
                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
 
+        // The trailing 'playerlist' literal puts the bots in the real PlayerList, so the server
+        // counts them as online players and selectors like @a reach them. Upstream made this a
+        // sticky global setting ("settings addplayerlist"); Brigadier makes per-invocation the
+        // natural shape, and a hidden global that silently changes what create does is worse for
+        // an operator than an explicit argument.
         root.then(Commands.literal("create")
                 .then(Commands.argument("name", StringArgumentType.string())
                         .executes(ctx -> create(ctx, 1, false))
+                        .then(Commands.literal("playerlist")
+                                .executes(ctx -> create(ctx, 1, true)))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
-                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false)))));
-        // No 'playerlist' subcommand: that spawn path is unsupported on NeoForge
-        // (PlayerList.getPlayers() is an unmodifiable view). See BotFactory.spawn.
+                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false))
+                                .then(Commands.literal("playerlist")
+                                        .executes(ctx -> create(ctx,
+                                                IntegerArgumentType.getInteger(ctx, "count"), true))))));
 
         root.then(Commands.literal("remove")
                 .then(Commands.argument("name", StringArgumentType.string())

@@ -221,7 +221,15 @@ public class Bot extends ServerPlayer {
         // ServerPlayer.server is private, and vanilla Entity has no getServer() (that
         // was a Paper addition). Level.getServer() is the route in NeoForge.
         if (isInPlayerList()) {
-            level().getServer().getPlayerList().getPlayers().remove(this);
+            // Not getPlayers(): that is an unmodifiable view and removing through it throws.
+            // This mirrors the insert in BotFactory.spawn, and was a latent crash until the
+            // spawn path became reachable — it could not fire while spawn threw first.
+            //
+            // PlayerList.remove(ServerPlayer) is public and would do a tidier job, clearing
+            // advancement triggers and broadcasting the info-remove packet. It is not used
+            // because it also calls save(player), writing a playerdata file per bot, and fires
+            // PlayerLoggedOut. Upstream fired neither.
+            level().getServer().getPlayerList().players.remove(this);
             setInPlayerList(false);
         }
 

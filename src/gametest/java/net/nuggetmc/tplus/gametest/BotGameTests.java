@@ -3,6 +3,7 @@ package net.nuggetmc.tplus.gametest;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestAssertException;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
@@ -16,6 +17,7 @@ import net.neoforged.testframework.gametest.GameTest;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
+import net.nuggetmc.tplus.bot.BotConnection;
 import net.nuggetmc.tplus.bot.BotRegistry;
 
 /**
@@ -102,34 +104,120 @@ public final class BotGameTests {
         helper.succeed();
     }
 
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("bot_joins_the_player_list")
+    static void botJoinsTheRealPlayerList(ExtendedGameTestHelper helper) {
+        // Spec risk 1, settled the other way. Plan A proved the Paper build's
+        // getPlayers().add(bot) is impossible — NeoForge narrowed getPlayers() to an
+        // unmodifiable view on purpose — and deferred the real route to here.
+        BotRegistry registry = new BotRegistry();
+        ServerLevel level = helper.getLevel();
+        MinecraftServer server = level.getServer();
+
+        int before = server.getPlayerList().getPlayerCount();
+
+        Bot bot = BotFactory.spawn(registry, level,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
+                BotGameProfiles.create("ListBot", null), true);
+
+        // The whole point of the feature: the server counts the bot as an online player.
+        helper.assertValueEqual(server.getPlayerList().getPlayerCount(), before + 1,
+                "player count after a playerlist spawn");
+        helper.assertTrue(server.getPlayerList().getPlayers().contains(bot),
+                "the bot must be in the player list");
+        helper.assertTrue(bot.isInPlayerList(), "the bot must know it is in the list");
+
+        bot.removeBot();
+
+        helper.assertValueEqual(server.getPlayerList().getPlayerCount(), before,
+                "removeBot must take the bot back out of the list");
+        helper.assertFalse(server.getPlayerList().getPlayers().contains(bot),
+                "the bot must be gone from the player list");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("playerlist_spawn_is_silent")
+    static void aPlayerListSpawnDoesNotAnnounceAJoin(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        ServerLevel level = helper.getLevel();
+
+        // Upstream's insert was silent. placeNewPlayer would broadcast "ListBot joined the
+        // game" to every player, fire PlayerLoggedInEvent, sync datapacks and teleport — none
+        // of which upstream did, and the join message alone makes spawning a hundred bots
+        // unusable. There is no clean hook to assert the absence of a broadcast, so this
+        // asserts the thing that proves placeNewPlayer was not used: the bot still has the
+        // fake connection the factory gave it, not a fresh one built around a real Connection.
+        Bot bot = BotFactory.spawn(registry, level,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
+                BotGameProfiles.create("QuietBot", null), true);
+
+        helper.assertTrue(bot.connection != null, "the bot keeps a packet listener");
+        helper.assertTrue(bot.connection.getConnection() instanceof BotConnection,
+                "the bot's connection must still be BotConnection");
+
+        registry.reset();
+        helper.succeed();
+    }
+
     @GameTest
     @EmptyTemplate(value = "5x6x5", floor = true)
-    @TestHolder("bot_playerlist_path_is_unsupported")
-    static void addingABotToThePlayerListIsRejected(ExtendedGameTestHelper helper) {
-        // Spec risk 1, settled. NeoForge changed PlayerList.getPlayers() to return
-        // Collections.unmodifiableList(players) on purpose, so the Paper build's
-        // getPlayers().add(bot) is impossible here. BotFactory rejects the path with an
-        // explanation rather than letting an opaque UnsupportedOperationException escape.
-        //
-        // When PlayerList.placeNewPlayer support lands in Plan B, this test SHOULD fail —
-        // that is the signal to replace it with real coverage of the new path.
+    @TestHolder("bot_connection_has_a_netty_channel")
+    static void botConnectionHasANettyChannel(ExtendedGameTestHelper helper) {
         BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(2, 2, 2), "ChannelBot");
 
-        UnsupportedOperationException thrown = null;
-        try {
-            BotFactory.spawn(registry, helper.getLevel(),
-                    Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 2, 2))),
-                    0f, 0f, BotGameProfiles.create("ListBot", null), true);
-        } catch (UnsupportedOperationException e) {
-            thrown = e;
+        // This looks like an implementation detail and is not. On a dedicated server
+        // NeoForge's ConfigSync.syncPendingConfigs runs every ServerTickEvent.Post, walks the
+        // PlayerList and calls hasChannel on each player's listener, which reads a netty
+        // attribute off this channel. With a null channel that is an NPE in the server tick —
+        // it crashed a real server on the first tick after a playerlist bot spawned.
+        //
+        // The GameTest server does not run that path, so no in-world test can reproduce the
+        // crash. This pins the invariant the crash depended on instead.
+        helper.assertTrue(bot.connection.getConnection().channel() != null,
+                "BotConnection must have a netty channel, or NeoForge's per-tick config sync "
+                        + "NPEs on any bot in the PlayerList");
+
+        bot.removeBot();
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "5x6x5", floor = true)
+    @TestHolder("playerlist_bot_survives_a_server_tick")
+    static void aPlayerListBotSurvivesAServerTick(ExtendedGameTestHelper helper) {
+        // The open question this task exists to answer: does vanilla tolerate a ServerPlayer
+        // in PlayerList.players whose connection goes nowhere? Every broadcast the server makes
+        // iterates that list. BotConnection swallows sends, so it should — but "should" is why
+        // this test is here rather than a comment.
+        BotRegistry registry = new BotRegistry();
+        MinecraftServer server = helper.getLevel().getServer();
+
+        Bot bot = BotFactory.spawn(registry, helper.getLevel(),
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2))), 0f, 0f,
+                BotGameProfiles.create("TickBot", null), true);
+
+        for (int i = 0; i < 20; i++) {
+            bot.tick();
         }
 
-        helper.assertTrue(thrown != null,
-                "the PlayerList spawn path should be rejected outright; if it now works, "
-                        + "placeNewPlayer support has landed and this test needs replacing");
-        helper.assertTrue(thrown.getMessage() != null && thrown.getMessage().contains("unmodifiable"),
-                "the rejection should explain why, got: " + thrown.getMessage());
+        // Something that broadcasts to every player in the list, which is where a bot with a
+        // dead connection would blow up if BotConnection were not swallowing sends.
+        server.getPlayerList().broadcastSystemMessage(
+                net.minecraft.network.chat.Component.literal("tick probe"), false);
 
+        helper.assertTrue(bot.isAlive(), "a playerlist bot must survive being ticked");
+        helper.assertTrue(server.getPlayerList().getPlayers().contains(bot),
+                "and must still be in the list");
+
+        bot.removeBot();
+        registry.reset();
         helper.succeed();
     }
 

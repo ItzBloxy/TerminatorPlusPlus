@@ -1,6 +1,7 @@
 package net.nuggetmc.tplus.bot;
 
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.embedded.EmbeddedChannel;
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
 import net.minecraft.network.protocol.Packet;
@@ -24,6 +25,23 @@ public final class BotConnection extends Connection {
 
     public BotConnection() {
         super(PacketFlow.SERVERBOUND);
+
+        // Give the connection a real netty channel that goes nowhere.
+        //
+        // Constructing an EmbeddedChannel around this handler fires channelActive, which is
+        // where Connection assigns its `channel` field. Without it channel() is null, and
+        // anything that asks the connection about its channel NPEs.
+        //
+        // That is not hypothetical and it is not something the GameTest server reproduces:
+        // on a dedicated server NeoForge's ConfigSync.syncPendingConfigs runs on every
+        // ServerTickEvent.Post, walks the PlayerList, and calls hasChannel on each player's
+        // listener, which reads a netty attribute off this channel. A bot in the real
+        // PlayerList crashed the server on its first tick before this existed.
+        //
+        // Nothing is ever written to the channel — every send() below is swallowed — so the
+        // EmbeddedChannel's outbound queue stays empty. Minecraft's own GameTestHelper builds
+        // its mock player connections the same way.
+        new EmbeddedChannel(this);
     }
 
     @Override

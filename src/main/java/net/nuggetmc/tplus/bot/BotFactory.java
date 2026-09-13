@@ -11,6 +11,7 @@ import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -53,21 +54,30 @@ public final class BotFactory {
         registry.add(bot);
 
         if (addToPlayerList) {
-            // Spec risk 1, resolved by a GameTest: this path cannot work on NeoForge.
-            // PlayerList.getPlayers() returns Collections.unmodifiableList(players) —
-            // "Neo: Return an unmodifiable view, we don't want people removing things
-            // without us knowing" — so the Paper build's getPlayers().add(bot) throws
-            // UnsupportedOperationException here.
+            // Upstream did this, and only this: insert, announce, add to the level.
             //
-            // Doing this properly means going through PlayerList.placeNewPlayer, the real
-            // join path, which also sends login packets, fires events and loads playerdata
-            // against a connection that goes nowhere. That is its own piece of work; it is
-            // not something to bodge with an access transformer against an intentional
-            // guard. Deferred to Plan B.
-            throw new UnsupportedOperationException(
-                    "Adding bots to the PlayerList is not supported on NeoForge: "
-                            + "PlayerList.getPlayers() is an unmodifiable view. This needs "
-                            + "PlayerList.placeNewPlayer support (deferred to Plan B).");
+            // Not placeNewPlayer. That is the supported join path, and it does far more —
+            // it rebinds player.connection to a fresh listener around a real Connection,
+            // sets up the inbound protocol, sends the login/difficulty/abilities packets,
+            // syncs datapacks, recipes, the recipe book and the scoreboard, teleports the
+            // player, fires OnDatapackSyncEvent and PlayerLoggedInEvent, and broadcasts
+            // "<name> joined the game" to everyone. Upstream fired none of that, and the
+            // join message alone makes spawning a hundred bots unusable.
+            //
+            // `players` is reachable only through an access transformer, because NeoForge
+            // narrowed getPlayers() to an unmodifiable view on purpose. See the AT file.
+            PlayerList list = server.getPlayerList();
+
+            list.players.add(bot);
+            bot.setInPlayerList(true);
+
+            broadcast(bot, ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(bot)));
+            level.addNewPlayer(bot);
+
+            // Deliberately NOT also putting the bot in playersByUUID. Upstream did not, so
+            // getPlayer(uuid) does not find a playerlist bot, and that asymmetry is upstream's.
+            // It looks exactly like an oversight to fix; doing so would change which entities
+            // vanilla systems can resolve by UUID, and nothing in this port needs it.
         } else {
             level.addFreshEntity(bot);
             broadcast(bot, new ClientboundPlayerInfoUpdatePacket(
