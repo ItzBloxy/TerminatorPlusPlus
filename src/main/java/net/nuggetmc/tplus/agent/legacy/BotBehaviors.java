@@ -13,11 +13,11 @@ import net.nuggetmc.tplus.bot.Bot;
 public final class BotBehaviors {
 
     private final AgentState state;
-    private final Navigation navigation;
+    private final Mining mining;
 
-    public BotBehaviors(AgentState state, Navigation navigation) {
+    public BotBehaviors(AgentState state, Mining mining) {
         this.state = state;
-        this.navigation = navigation;
+        this.mining = mining;
     }
 
     /**
@@ -33,7 +33,7 @@ public final class BotBehaviors {
             bot.faceLocation(target.position());
         }
 
-        navigation.cancelMiningAnim(bot);
+        mining.stopMining(bot);
 
         if (state.boatCooldown.contains(bot)) {
             return;

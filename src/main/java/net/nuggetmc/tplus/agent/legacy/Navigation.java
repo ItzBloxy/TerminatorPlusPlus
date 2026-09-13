@@ -19,10 +19,12 @@ public final class Navigation {
 
     private final AgentState state;
     private final Agent agent;
+    private final Mining mining;
 
-    public Navigation(AgentState state, Agent agent) {
+    public Navigation(AgentState state, Agent agent, Mining mining) {
         this.state = state;
         this.agent = agent;
+        this.mining = mining;
     }
 
     /**
@@ -115,7 +117,7 @@ public final class Navigation {
         vector.normalize().multiply(0.05);
         vector.setY(vector.getY() * 1.2);
 
-        cancelMiningAnim(bot);
+        mining.stopMining(bot);
 
         if (anim) {
             bot.swim();
@@ -132,14 +134,5 @@ public final class Navigation {
 
         bot.faceLocation(livingTarget.position());
         bot.addVelocity(vector);
-    }
-
-    /** Cancels a running swing animation, if any. Upstream inlined this in five places. */
-    void cancelMiningAnim(Bot bot) {
-        Integer task = state.miningAnim.remove(bot);
-
-        if (task != null) {
-            agent.cancel(task);
-        }
     }
 }

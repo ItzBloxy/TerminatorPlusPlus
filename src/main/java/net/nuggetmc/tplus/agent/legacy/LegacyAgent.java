@@ -57,8 +57,8 @@ public final class LegacyAgent extends Agent {
         this.state = registry.state();
         this.targeting = new Targeting(registry);
         this.mining = new Mining(state, this);
-        this.navigation = new Navigation(state, this);
-        this.behaviors = new BotBehaviors(state, navigation);
+        this.navigation = new Navigation(state, this, mining);
+        this.behaviors = new BotBehaviors(state, mining);
     }
 
     public Targeting targeting() {
@@ -87,7 +87,7 @@ public final class LegacyAgent extends Agent {
         // Task 23: blockScan.tryPreMLG(bot, pos);
 
         if (livingTarget == null) {
-            // Task 19: mining.stopMining(bot);
+            mining.stopMining(bot);
             return;
         }
 

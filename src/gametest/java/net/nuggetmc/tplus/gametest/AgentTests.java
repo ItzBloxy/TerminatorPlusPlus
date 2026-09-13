@@ -11,6 +11,7 @@ import net.neoforged.testframework.gametest.EmptyTemplate;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
 import net.neoforged.testframework.gametest.GameTest;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
+import net.nuggetmc.tplus.agent.legacy.Mining;
 import net.nuggetmc.tplus.agent.legacy.TargetGoal;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
@@ -473,6 +474,94 @@ public final class AgentTests {
         // The AT_D path: the block being broken is the one the bot is standing in, so
         // currentTarget resolves through the offset rather than through getStandingOn.
         helper.assertBlockPresent(Blocks.AIR, fence);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("losing_its_target_stops_the_swing_animation")
+    static void losing_its_target_stops_the_swing_animation(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        Bot quarry = spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        helper.setBlock(new BlockPos(6, 2, 7), Blocks.BEDROCK);
+
+        settle(registry, 5);
+        run(registry, 20);
+        helper.assertTrue(registry.state().miningAnim.containsKey(bot),
+                "the bot must be mining before the target goes away");
+
+        // Check 4: tickBot gives up the moment locateTarget comes back null, and the swing has
+        // to stop with it — nothing else cancels it on that path.
+        registry.remove(quarry);
+        run(registry, 5);
+
+        helper.assertTrue(registry.state().miningAnim.isEmpty(),
+                "a bot with nothing to hunt must not keep swinging");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("place_water_down_dumps_the_bucket_and_picks_it_up")
+    static void place_water_down_dumps_the_bucket_and_picks_it_up(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Firefighter");
+
+        // Its own Mining over the registry's state and agent: placeWaterDown has no call site
+        // until task 22 wires miscellaneousChecks, and an accessor added only for a test would
+        // outlive the reason for it.
+        Mining mining = new Mining(registry.state(), registry.agent());
+
+        BlockPos at = helper.absolutePos(new BlockPos(6, 3, 7));
+        mining.placeWaterDown(bot, at);
+
+        helper.assertBlockPresent(Blocks.WATER, new BlockPos(6, 3, 7));
+        helper.assertTrue(bot.getMainHandItem().is(Items.BUCKET),
+                "the bucket must be empty while the water is down, got " + bot.getMainHandItem());
+
+        // Five ticks later it picks the water back up. The scheduler only advances inside
+        // registry.tick(), so this is exactly five agent ticks and not a wall-clock wait.
+        run(registry, 5);
+
+        helper.assertBlockPresent(Blocks.AIR, new BlockPos(6, 3, 7));
+        helper.assertTrue(bot.getMainHandItem().is(Items.WATER_BUCKET),
+                "and full again afterwards, got " + bot.getMainHandItem());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("down_mine_in_water_dives_and_suppresses_fall_damage")
+    static void down_mine_in_water_dives_and_suppresses_fall_damage(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Mining mining = new Mining(registry.state(), registry.agent());
+
+        BlockPos floor = new BlockPos(6, 1, 7);
+        helper.setBlock(floor, Blocks.WATER);
+        Bot bot = spawn(helper, registry, floor, "Diver");
+        settle(registry, 5);
+
+        mining.downMine(bot, helper.absolutePos(floor));
+
+        // The water branch is not an else: it runs after the centring nudge and overwrites its
+        // velocity, so Y ends at exactly -1 however far off-centre the bot is.
+        helper.assertTrue(bot.getVelocity().getY() == -1.0,
+                "a bot in water dives at one block a tick, got " + bot.getVelocity().getY());
+        helper.assertTrue(registry.state().fallDamageCooldown.contains(bot),
+                "and must be exempt from fall damage while it does");
+
+        run(registry, 10);
+
+        helper.assertTrue(!registry.state().fallDamageCooldown.contains(bot),
+                "the exemption lasts ten ticks and no longer");
 
         registry.reset();
         helper.succeed();

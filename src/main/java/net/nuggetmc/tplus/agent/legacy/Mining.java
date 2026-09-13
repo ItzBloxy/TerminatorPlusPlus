@@ -1,8 +1,10 @@
 package net.nuggetmc.tplus.agent.legacy;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -15,6 +17,7 @@ import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.agent.AgentState;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
+import net.nuggetmc.tplus.motion.MotionVec;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -292,6 +295,107 @@ public final class Mining {
         } else if (offset.isSide()) {
             bot.setBotPitch(0);
         }
+    }
+
+    /**
+     * Centres the bot on its own block before it mines the floor out from under itself.
+     *
+     * <p>Ported from {@code downMine}. Two independent nudges, and the second is not an
+     * else-branch: a bot in water gets both, so the dive overwrites the centring velocity.
+     *
+     * <p>The vector is the offset from the bot to the centre of the block it is standing in.
+     * Upstream reads {@code player.getLocation()} twice and mutates the first copy — Bukkit
+     * returns a fresh {@code Location} from every call, so the subtraction is between two
+     * different objects and the arithmetic is real.
+     *
+     * <p>Both {@code length() > 1} guards are dead code, upstream included: neither component
+     * can exceed half a block, so the vector is never longer than {@code sqrt(0.5)}. Kept
+     * because removing a branch is a change, and an unreachable branch costs nothing.
+     */
+    public void downMine(Bot bot, BlockPos block) {
+        ServerLevel level = (ServerLevel) bot.level();
+        Vec3 pos = bot.position();
+        Vec3 centre = new Vec3(Math.floor(pos.x) + 0.5, pos.y, Math.floor(pos.z) + 0.5);
+
+        if (!BlockRules.isNoCrack(level.getBlockState(block))) {
+            MotionVec nudge = MotionVec.of(centre.subtract(pos));
+
+            if (nudge.length() > 1) {
+                nudge.normalize();
+            }
+
+            nudge.setY(0).multiply(0.1);
+            bot.setVelocity(nudge);
+        }
+
+        if (bot.isBotInWater()) {
+            MotionVec dive = MotionVec.of(centre.subtract(pos));
+
+            if (dive.length() > 1) {
+                dive.normalize();
+            }
+
+            // Y is set after the scale, so the dive is always exactly one block per tick
+            // downward however far off-centre the bot is.
+            dive.multiply(0.3).setY(-1);
+
+            if (!state.fallDamageCooldown.contains(bot)) {
+                state.fallDamageCooldown.add(bot);
+                agent.later(10, () -> state.fallDamageCooldown.remove(bot));
+            }
+
+            bot.setVelocity(dive);
+        }
+    }
+
+    /**
+     * Stops a bot's swing animation.
+     *
+     * <p>Ported from {@code stopMining}. Upstream had this method and three copies of its body
+     * inlined elsewhere; {@code Navigation.swim} and {@code BotBehaviors.resetHand} are two of
+     * those call sites and they call this instead.
+     */
+    public void stopMining(Bot bot) {
+        Integer task = state.miningAnim.remove(bot);
+
+        if (task != null) {
+            agent.cancel(task);
+        }
+    }
+
+    /**
+     * Dumps a water bucket at {@code pos} and picks it back up five ticks later.
+     *
+     * <p>Ported from {@code placeWaterDown}. {@code BotBehaviors} uses it to put out a fire the
+     * bot is standing in. Unlike the MLG in {@code onFallDamage} it has no waterlogging branch —
+     * upstream did not write one here, and its call sites are all air or fire.
+     *
+     * <p>The pickup re-checks the block, so water that has flowed away or been replaced is left
+     * alone and the bot silently keeps the empty bucket.
+     */
+    public void placeWaterDown(Bot bot, BlockPos pos) {
+        ServerLevel level = (ServerLevel) bot.level();
+
+        if (level.getBlockState(pos).getBlock() == Blocks.WATER) {
+            return;
+        }
+
+        bot.look(Direction.DOWN);
+        bot.punch();
+        level.setBlockAndUpdate(pos, Blocks.WATER.defaultBlockState());
+        level.playSound(null, pos, SoundEvents.BUCKET_EMPTY, SoundSource.BLOCKS, 1f, 1f);
+        bot.setItem(new ItemStack(Items.BUCKET));
+
+        agent.later(5, () -> {
+            if (level.getBlockState(pos).getBlock() != Blocks.WATER) {
+                return;
+            }
+
+            bot.look(Direction.DOWN);
+            bot.setItem(new ItemStack(Items.WATER_BUCKET));
+            level.playSound(null, pos, SoundEvents.BUCKET_FILL, SoundSource.BLOCKS, 1f, 1f);
+            level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
+        });
     }
 
     /**

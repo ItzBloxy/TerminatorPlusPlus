@@ -7771,11 +7771,16 @@ locBlock.setZ(locBlock.getBlockZ() + 0.5);
 Vector vector = locBlock.toVector().subtract(player.getLocation().toVector());
 ```
 
-`player.getLocation()` returns a **fresh** `Location` each call in Bukkit, so `locBlock` and the
-second `getLocation()` are different objects and the subtraction is real — the version above is
-correct, not a fix. Confirm that by reading Bukkit's `getLocation` contract before accepting either
-reading; if it did return the same object the nudge would always be `(0.5, 0, 0.5)` normalised,
-and the comment above needs deleting.
+**Resolved during execution: there is no deviation.** Bukkit's `Entity#getLocation()` is documented
+as returning "a new copy of Location containing the position of this entity", and CraftBukkit
+implements it as a fresh `new Location(...)`. So `locBlock` and the second `getLocation()` are
+different objects, the subtraction really does give the offset from the bot to its block's centre,
+and the code above is a straight translation. The javadoc shipped with `downMine` says so rather
+than claiming a fix, and the "always `(0.5, 0, 0.5)`" reading is wrong and was dropped.
+
+What is worth recording is what the guard does: both `length() > 1` branches are unreachable in
+either reading, because neither component can exceed half a block. They are kept anyway — an
+unreachable branch costs nothing and deleting one is a change.
 
 - [ ] **Step 2: Wire check 4 into `tickBot`**
 
