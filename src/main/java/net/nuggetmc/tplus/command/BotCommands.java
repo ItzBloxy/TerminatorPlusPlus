@@ -122,21 +122,40 @@ public final class BotCommands {
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("tplus")
                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
 
-        // The trailing 'playerlist' literal puts the bots in the real PlayerList, so the server
-        // counts them as online players and selectors like @a reach them. Upstream made this a
-        // sticky global setting ("settings addplayerlist"); Brigadier makes per-invocation the
-        // natural shape, and a hidden global that silently changes what create does is worse for
-        // an operator than an explicit argument.
+        // Six nodes, each executable, because Brigadier has no optional-in-the-middle argument: a
+        // chain grows left to right and reaching a later argument means typing the earlier ones.
+        // `none` is the filler for the two word slots; <item> is last because it is the only
+        // argument with no sensible filler.
+        //
+        // The playerlist slot puts the bots in the real PlayerList, so the server counts them as
+        // online players and selectors like @a reach them. Upstream made this a sticky global
+        // setting ("settings addplayerlist"); Brigadier makes per-invocation the natural shape,
+        // and a hidden global that silently changes what create does is worse for an operator
+        // than an explicit argument. It was a literal until this chain needed a fixed depth for
+        // it -- same spelling, same effect, but `create <name> playerlist` with the count
+        // omitted is now `create <name> 1 playerlist`.
         root.then(Commands.literal("create")
                 .then(Commands.argument("name", StringArgumentType.string())
-                        .executes(ctx -> create(ctx, 1, false))
-                        .then(Commands.literal("playerlist")
-                                .executes(ctx -> create(ctx, 1, true)))
-                        .then(Commands.argument("count", IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
-                                .executes(ctx -> create(ctx, IntegerArgumentType.getInteger(ctx, "count"), false))
-                                .then(Commands.literal("playerlist")
-                                        .executes(ctx -> create(ctx,
-                                                IntegerArgumentType.getInteger(ctx, "count"), true))))));
+                        .executes(ctx -> create(ctx, 1))
+                        .then(Commands.argument("count",
+                                        IntegerArgumentType.integer(1, MAX_BOTS_PER_COMMAND))
+                                .executes(ctx -> create(ctx, 2))
+                                .then(Commands.argument("playerlist", StringArgumentType.word())
+                                        .suggests((c, b) -> {
+                                            b.suggest("none");
+                                            b.suggest("playerlist");
+                                            return b.buildFuture();
+                                        })
+                                        .executes(ctx -> create(ctx, 3))
+                                        .then(Commands.argument("armor", StringArgumentType.word())
+                                                .suggests(tierSuggestions(true))
+                                                .executes(ctx -> create(ctx, 4))
+                                                .then(Commands.argument("tools", StringArgumentType.word())
+                                                        .suggests(tierSuggestions(false))
+                                                        .executes(ctx -> create(ctx, 5))
+                                                        .then(Commands.argument("item",
+                                                                        ItemArgument.item(event.getBuildContext()))
+                                                                .executes(ctx -> create(ctx, 6)))))))));
 
         root.then(Commands.literal("remove")
                 .then(Commands.argument("name", StringArgumentType.string())
@@ -327,12 +346,76 @@ public final class BotCommands {
         dispatcher.register(root);
     }
 
-    private static int create(CommandContext<CommandSourceStack> ctx, int count, boolean playerList) {
+    /**
+     * Spawns bots, optionally equipped.
+     *
+     * @param depth how far along the six-node chain the parse got, and therefore which arguments
+     *              exist. Brigadier offers no way to ask a {@link CommandContext} whether an
+     *              argument was present — {@code getArgument} throws for a missing name — so the
+     *              node that matched says so rather than the handler probing for it.
+     */
+    private static int create(CommandContext<CommandSourceStack> ctx, int depth)
+            throws CommandSyntaxException {
         CommandSourceStack source = ctx.getSource();
         String name = StringArgumentType.getString(ctx, "name");
+        int count = depth >= 2 ? IntegerArgumentType.getInteger(ctx, "count") : 1;
+
+        boolean playerList = false;
+
+        if (depth >= 3) {
+            String word = StringArgumentType.getString(ctx, "playerlist");
+
+            if (word.equalsIgnoreCase("playerlist")) {
+                playerList = true;
+            } else if (!word.equalsIgnoreCase("none")) {
+                source.sendFailure(Component.literal(
+                        "'" + word + "' must be 'playerlist' or 'none'"));
+                return 0;
+            }
+        }
+
+        // The two defaults are not symmetric, and cannot be. An omitted armour argument means no
+        // armour, which is what a bot has always spawned with; an omitted tools argument means
+        // IRON, which is also what a bot has always spawned with. Typing `none` for tools is a
+        // third thing -- the floor, wood.
+        EquipmentTier armor = EquipmentTier.NONE;
+        EquipmentTier tools = EquipmentTier.IRON;
+
+        if (depth >= 4) {
+            armor = tier(source, StringArgumentType.getString(ctx, "armor"), true);
+
+            if (armor == null) {
+                return 0;
+            }
+        }
+
+        if (depth >= 5) {
+            tools = tier(source, StringArgumentType.getString(ctx, "tools"), false);
+
+            if (tools == null) {
+                return 0;
+            }
+
+            // `none` in the tools slot is the chain's filler and floors at wood. Resolved here so
+            // the feedback names what the bots actually got; setToolTier applies the same clamp
+            // regardless.
+            tools = tools.asToolTier();
+        }
+
+        // Built here, on the command thread, rather than inside the async skin callback: the
+        // callback runs on a worker until onServerThread hands it back, and ItemStack
+        // construction reads data components.
+        ItemStack item = depth >= 6
+                ? ItemArgument.getItem(ctx, "item").createItemStack(1)
+                : ItemStack.EMPTY;
+
         ServerLevel level = source.getLevel();
         Vec3 pos = source.getPosition();
         MinecraftServer server = source.getServer();
+
+        boolean inList = playerList;
+        EquipmentTier armorTier = armor;
+        EquipmentTier toolTier = tools;
 
         source.sendSuccess(() -> Component.literal("Fetching skin for " + name + "..."), false);
 
@@ -346,7 +429,18 @@ public final class BotCommands {
                 GameProfile profile = BotGameProfiles.create(botName, skin);
 
                 Bot bot = BotFactory.spawn(TerminatorPlus.registry(), level, pos,
-                        source.getRotation().y, source.getRotation().x, profile, playerList);
+                        source.getRotation().y, source.getRotation().x, profile, inList);
+
+                bot.setToolTier(toolTier);
+                armorTier.equipArmor(bot);
+
+                if (!item.isEmpty()) {
+                    // Same pair /tplus give does: the default item is what setItem(null) restores
+                    // and what ItemUtils scores for damage, and putting it in hand now is what
+                    // someone typing the command expects.
+                    bot.setDefaultItem(item.copy());
+                    bot.setItem(null);
+                }
 
                 if (i > 1) {
                     bot.getBotVelocity()
@@ -358,8 +452,10 @@ public final class BotCommands {
                 }
             }
 
-            source.sendSuccess(() -> Component.literal(
-                    "Spawned " + count + " bot(s)" + (playerList ? " in the player list" : "")), true);
+            source.sendSuccess(() -> Component.literal("Spawned " + count + " bot(s)"
+                    + (inList ? " in the player list" : "")
+                    + " with " + armorTier.id() + " armour, " + toolTier.id() + " tools"
+                    + (item.isEmpty() ? "" : " and " + item.getHoverName().getString())), true);
         }));
 
         return count;
