@@ -194,6 +194,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -273,7 +274,14 @@ class EquipmentTierTest {
 
             if (tier.acceptsAsTools()) {
                 assertEquals(3, tier.tools().size(), tier.id() + " tools");
-                assertFalse(tier.tools().contains(null), tier.id() + " tools");
+
+                // allMatch, not contains(null): tools() hands back a List.of, and
+                // ImmutableCollections.contains throws NPE on a null probe rather than
+                // returning false. The list construction would have rejected a null element
+                // anyway, so this is belt and braces -- but it must not be the thing that
+                // throws.
+                assertTrue(tier.tools().stream().allMatch(Objects::nonNull),
+                        tier.id() + " tools");
             }
         }
     }
