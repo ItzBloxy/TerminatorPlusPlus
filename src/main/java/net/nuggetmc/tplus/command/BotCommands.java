@@ -242,6 +242,10 @@ public final class BotCommands {
         // under an `at` literal, so Brigadier reports no ambiguity between a block id and a
         // position.
         root.then(Commands.literal("environment")
+                .then(Commands.literal("help")
+                        .executes(ctx -> environmentHelp(ctx, ""))
+                        .then(Commands.literal("blocks").executes(ctx -> environmentHelp(ctx, "blocks")))
+                        .then(Commands.literal("mobs").executes(ctx -> environmentHelp(ctx, "mobs"))))
                 .then(Commands.literal("getblock")
                         .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                 .executes(BotCommands::getBlock)))
@@ -636,6 +640,36 @@ public final class BotCommands {
 
         ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
         return null;
+    }
+
+    /**
+     * Why this command exists.
+     *
+     * <p>Ported from {@code help}. Both bodies are upstream's text, reflowed, plus one sentence
+     * upstream should have had: neither list survives a restart.
+     */
+    private static int environmentHelp(CommandContext<CommandSourceStack> ctx, String topic) {
+        String body = switch (topic) {
+            case "blocks" -> """
+                    Blocks added by mods are not solid as far as vanilla is concerned, so bots
+                    walk into them, place water against them, and fail to stand on them.
+                      /tplus environment addsolid <block> declares one solid.
+                      /tplus environment addsolid at <pos> declares whatever is at that position.
+                    The list is not saved and does not survive a restart.""";
+            case "mobs" -> """
+                    The custom mob list is an operator-defined list of entity types.
+                      /tplus environment addmob <type> adds one.
+                      /tplus environment moblisttype changes what the list is for: CUSTOM makes
+                      it the whole of the CUSTOM_LIST goal, and HOSTILE, RAIDER or MOB appends it
+                      to that goal's built-in set.
+                    The list is not saved and does not survive a restart.""";
+            default -> """
+                    /tplus environment help blocks - declaring modded blocks solid.
+                    /tplus environment help mobs - building the custom mob list.""";
+        };
+
+        ctx.getSource().sendSuccess(() -> Component.literal(body), false);
+        return 1;
     }
 
     /**

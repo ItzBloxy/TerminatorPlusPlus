@@ -9941,11 +9941,31 @@ the commit message. The sanctioned ones, for reference:
     hard-boundary form and **rejected** a weight of zero. Omitting them is the same thing as
     `strict`, and an explicit zero now means the same as omitting it (Task 24).
 
+19. `/botenvironment` becomes `/tplus environment`, and the subcommands lose the qualifiers a flat
+    root needed: `addCustomMob` is `addmob`, `getMaterial` is `getblock` (Plan C decision 1).
+20. Upstream's `mat == null` and `type == null` branches, its `parseDoubleOrRelative`, its
+    `isLocationLoaded` check and its `@Autofill` method are all gone, replaced by the argument
+    types. An unknown id is rejected before the handler runs, and the message is vanilla's rather
+    than upstream's (Plan C decision 4).
+21. `addsolid`/`removesolid` take their location form under an `at` literal rather than as a second
+    argument shape, so Brigadier reports no ambiguity — verified in the server log (Plan C
+    decision 5).
+22. `BlockRules.SOLID_OVERRIDES` is not cleared by `BotRegistry.reset`, matching upstream's
+    surviving `/bot removeall`, and does not persist across a restart, also matching upstream
+    (Plan C decisions 2 and 6).
+
 Found by the Task 24 audit and **fixed rather than sanctioned**: four `faceLocation` calls aimed
 at a block's centre where upstream aimed at its lower corner, because a Bukkit block `Location`
 *is* the lower corner. `Mining.preBreak`'s AT case was half a block out in Y, and the footprint
 scan, the pre-MLG and the clutch were half a block out in X and Z. All cosmetic — they only move
 where a bot's head points — and all now match.
+
+Found while planning Plan C and **fixed rather than sanctioned** in its Task 1:
+`Bot.attemptBlockPlace` guarded on `state.isSolid()` where upstream guards on
+`LegacyMats.isSolid`, which consults the operator's solid list. The two agree exactly while that
+list is empty, which is why four review passes walked past it, and disagree the moment it has
+entries — a bot would respect a declared-solid block everywhere except there, where it would
+overwrite it.
 
 Found by the phase 7 review and **fixed rather than sanctioned**: upstream's `/bot settings
 region` with no arguments reports the current region, and that form was missing. It was invisible

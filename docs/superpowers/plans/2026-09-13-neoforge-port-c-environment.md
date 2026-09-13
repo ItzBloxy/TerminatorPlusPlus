@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** `/tplus environment` — the operator surface for the two lists the agent already reads and
 nothing currently writes. After Plan C a server owner can tell bots that a modded block is solid,
@@ -241,7 +241,7 @@ an empty set makes `isSolid` exactly what it is today.
 - Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BlockRuleTests.java`
 - Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BotActionTests.java`
 
-- [ ] **Step 1: Write the failing GameTests**
+- [x] **Step 1: Write the failing GameTests**
 
 In `BlockRuleTests`:
 
@@ -328,7 +328,7 @@ has its own.
 
 Run them. The first two fail to compile (no such methods) and the third fails on the assertion.
 
-- [ ] **Step 2: Add the set and its accessors**
+- [x] **Step 2: Add the set and its accessors**
 
 Replace `BlockRules.isSolid` and its javadoc:
 
@@ -383,7 +383,7 @@ Replace `BlockRules.isSolid` and its javadoc:
 
 Imports: `java.util.Collections`, `java.util.HashSet`.
 
-- [ ] **Step 3: Route `attemptBlockPlace` through it**
+- [x] **Step 3: Route `attemptBlockPlace` through it**
 
 In `Bot.attemptBlockPlace`:
 
@@ -397,7 +397,7 @@ In `Bot.attemptBlockPlace`:
 Add `import net.nuggetmc.tplus.agent.legacy.BlockRules;`. The `bot` package already depends on
 `agent.legacy` through `GroundCheck`, so this adds no new edge.
 
-- [ ] **Step 4: Run everything**
+- [x] **Step 4: Run everything**
 
 ```bash
 ./gradlew build && ./gradlew runGameTestServer
@@ -406,7 +406,7 @@ Add `import net.nuggetmc.tplus.agent.legacy.BlockRules;`. The `bot` package alre
 Expected: 131 GameTests, 84 unit tests, all green. If a *later* test in the batch fails rather than
 one of the three new ones, an override leaked — check that every new test clears in a `finally`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus src/gametest/java/net/nuggetmc/tplus
@@ -422,7 +422,7 @@ Five of the eleven, and the two location forms.
 **Files:**
 - Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java`
 
-- [ ] **Step 1: Add the subtree**
+- [x] **Step 1: Add the subtree**
 
 In `register`, beside the other `root.then(...)` calls:
 
@@ -452,7 +452,7 @@ In `register`, beside the other `root.then(...)` calls:
 Keep it as one `root.then` chain so the whole subtree reads in one place; Task 3 appends its six to
 the same chain.
 
-- [ ] **Step 2: Add the handlers**
+- [x] **Step 2: Add the handlers**
 
 ```java
     /**
@@ -545,7 +545,7 @@ Imports to add: `net.minecraft.commands.arguments.ResourceArgument`,
 
 `Identifier`, not `ResourceLocation` — 26.2 renamed it, and `Registry.getKey` returns the new name.
 
-- [ ] **Step 3: Build and commit**
+- [x] **Step 3: Build and commit**
 
 ```bash
 ./gradlew build
@@ -567,7 +567,7 @@ grep -n "CUSTOM_MOB_LIST\|customListMode" src/main/java/net/nuggetmc/tplus/agent
 **Files:**
 - Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java`
 
-- [ ] **Step 1: Extend the subtree**
+- [x] **Step 1: Extend the subtree**
 
 Append to the `environment` chain from Task 2:
 
@@ -594,7 +594,7 @@ Append to the `environment` chain from Task 2:
                                 .executes(BotCommands::setMobListType)))
 ```
 
-- [ ] **Step 2: Add the handlers**
+- [x] **Step 2: Add the handlers**
 
 ```java
     /**
@@ -686,7 +686,7 @@ Imports to add: `net.minecraft.world.entity.EntityType`,
 `CustomListMode.from` and `listModes()` are already ported and are exactly what upstream's
 `mobListType` used — do not reimplement either.
 
-- [ ] **Step 3: Build and commit**
+- [x] **Step 3: Build and commit**
 
 ```bash
 ./gradlew build
@@ -698,7 +698,7 @@ git commit -m "feat: add /tplus environment custom-mob subcommands"
 
 ## Task 4: Help, verification and the register
 
-- [ ] **Step 1: Port the two help bodies**
+- [x] **Step 1: Port the two help bodies**
 
 Upstream's `help blocks` and `help mobs` are the only place the reason for this command is written
 down. Keep both, and add the sentence upstream did not write about persistence.
@@ -742,14 +742,14 @@ down. Keep both, and add the sentence upstream did not write about persistence.
     }
 ```
 
-- [ ] **Step 2: Run everything**
+- [x] **Step 2: Run everything**
 
 ```bash
 ./gradlew build && ./gradlew runGameTestServer
 ./gradlew jar && unzip -l build/libs/*.jar | grep -iE "gametest|Test" || echo "clean"
 ```
 
-- [ ] **Step 3: Verify the tree on a running server**
+- [x] **Step 3: Verify the tree on a running server**
 
 Plan B's RCON client is in the session scratchpad; rewrite it if it is gone — it is forty lines of
 socket code and it is the only way to drive these eleven handlers without a client.
@@ -783,7 +783,7 @@ message; and `moblisttype` with no argument reports rather than fails.
 The server log must contain no `Ambiguity` warning for the `environment` node. If it does, decision
 5's literal split was not applied somewhere.
 
-- [ ] **Step 4: Extend Plan B's deviation register**
+- [x] **Step 4: Extend Plan B's deviation register**
 
 Add to the numbered list in
 `docs/superpowers/plans/2026-09-12-neoforge-port-b-agent.md`, continuing from 18:
@@ -803,7 +803,7 @@ And record the fix, not as a deviation:
 > `state.isSolid()` where upstream guards on `LegacyMats.isSolid`. Identical while the override
 > list was empty, which is why nothing caught it, and wrong the moment the list got a writer.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A src/main/java/net/nuggetmc/tplus docs/superpowers/plans
