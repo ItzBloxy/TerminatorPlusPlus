@@ -95,6 +95,8 @@ Renames and traps this port walked into:
   network-id lookup.
 - Mobs gained per-mob subpackages: `world.entity.animal.cow.Cow`,
   `world.entity.monster.zombie.Zombie`.
+- Gamerules are snake_case: `spawn_mobs`, `spawn_monsters`, `advance_time` — not `doMobSpawning`
+  or `doDaylightCycle`. `/help gamerule` over RCON lists them.
 - `ResourceOrTagArgument` accepts a type or a `#tag`, and `Result.unwrap()` gives an
   `Either<Holder.Reference, HolderSet.Named>` — so a tag can be expanded to concrete values rather
   than kept as an opaque predicate.

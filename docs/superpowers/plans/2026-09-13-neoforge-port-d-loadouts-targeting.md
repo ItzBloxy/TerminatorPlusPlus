@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Arm a bot at the moment it spawns, and point bots at a named entity or entity type.
 
@@ -181,7 +181,7 @@ because it is the filler. So `acceptsAsArmor()` is `this == NONE || armor.length
 - Create: `src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java`
 - Test: `src/test/java/net/nuggetmc/tplus/bot/EquipmentTierTest.java`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/test/java/net/nuggetmc/tplus/bot/EquipmentTierTest.java`:
 
@@ -324,7 +324,7 @@ class EquipmentTierTest {
 }
 ```
 
-- [ ] **Step 2: Run the test and watch it fail**
+- [x] **Step 2: Run the test and watch it fail**
 
 ```bash
 ./gradlew test --tests '*EquipmentTierTest*'
@@ -332,7 +332,7 @@ class EquipmentTierTest {
 
 Expected: compilation failure — `cannot find symbol: class EquipmentTier`.
 
-- [ ] **Step 3: Write the enum**
+- [x] **Step 3: Write the enum**
 
 Create `src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java`:
 
@@ -475,7 +475,7 @@ public enum EquipmentTier {
 }
 ```
 
-- [ ] **Step 4: Run the test and watch it pass**
+- [x] **Step 4: Run the test and watch it pass**
 
 ```bash
 ./gradlew test --tests '*EquipmentTierTest*'
@@ -488,7 +488,7 @@ If instead it fails at class-load with a registry error rather than an assertion
 constants need bootstrapping — but `ItemUtilsTest` already resolves them without one, so treat that
 as a signal that something else changed and fix it there rather than adding a `@BeforeAll`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java \
@@ -511,7 +511,7 @@ Task 1 built the table and unit tested it. This is the three places it is read: 
 slots, which tool goes in its hand, and **how fast that tool breaks a block**. All three need a
 GameTest rather than a unit test, because all three build `ItemStack`s.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `BotActionTests`, **before the first `@GameTest` method in the outer class** — a test
 appended into a nested class is silently not a test, and five once sat dead that way.
@@ -733,7 +733,7 @@ import net.nuggetmc.tplus.agent.legacy.ScanOffset;
 import net.nuggetmc.tplus.bot.EquipmentTier;
 ```
 
-- [ ] **Step 2: Run the tests and watch them fail**
+- [x] **Step 2: Run the tests and watch them fail**
 
 ```bash
 ./gradlew runGameTestServer
@@ -741,7 +741,7 @@ import net.nuggetmc.tplus.bot.EquipmentTier;
 
 Expected: compilation failure — `cannot find symbol: method setToolTier(EquipmentTier)`.
 
-- [ ] **Step 3: Add `asToolTier` and `equipArmor` to `EquipmentTier`**
+- [x] **Step 3: Add `asToolTier` and `equipArmor` to `EquipmentTier`**
 
 ```java
     /**
@@ -805,7 +805,7 @@ Add the matching unit test to `EquipmentTierTest`, and run `./gradlew test --tes
     }
 ```
 
-- [ ] **Step 4: Add the field to `Bot`**
+- [x] **Step 4: Add the field to `Bot`**
 
 Beside `targetPlayer`:
 
@@ -842,7 +842,7 @@ and the accessors, beside `setTargetPlayer`:
 
 Add `import net.nuggetmc.tplus.bot.EquipmentTier;` — not needed, same package. Check before adding.
 
-- [ ] **Step 5: Widen the progress map**
+- [x] **Step 5: Widen the progress map**
 
 `AgentState.java:82`. Diamond's step is 16, so progress reaches 128 before it is checked, and a
 byte tops out at 127:
@@ -859,7 +859,7 @@ byte tops out at 127:
     public final Map<Integer, Short> mining = new HashMap<>();
 ```
 
-- [ ] **Step 6: Move the tool list out of `Mining` and make progress scale**
+- [x] **Step 6: Move the tool list out of `Mining` and make progress scale**
 
 Delete the `TOOLS` constant at `Mining.java:52-55` **and its javadoc at 39-51** — the
 "Components not bound yet" paragraph and the `LegacyItems` provenance both live on `EquipmentTier`
@@ -1010,7 +1010,7 @@ Then the `optimalTool` signature and its one call site:
 Fix imports: add `net.nuggetmc.tplus.bot.EquipmentTier`. `Items` stays — `placeWaterDown` uses
 `Items.WATER_BUCKET`. `java.util.List` may now be unused; check before removing it.
 
-- [ ] **Step 7: Run the tests and watch them pass**
+- [x] **Step 7: Run the tests and watch them pass**
 
 ```bash
 ./gradlew runGameTestServer
@@ -1022,7 +1022,7 @@ If `iron_still_breaks_a_block_in_twenty_ticks` reports 22 rather than 20, the de
 testing `progress` instead of `next` and the ladder has gained a rung. If it reports 0, the task
 cancelled — check the block is at `(x, 2, z)` and not in front of the bot.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/bot/Bot.java \
@@ -1042,13 +1042,13 @@ git commit -m "feat: scale break speed with a bot's own tool tier"
 - Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java:83-99` (the tables), `:222-228`
   (the `armor` registration), and the `armor` handler
 
-- [ ] **Step 1: Delete the two tables**
+- [x] **Step 1: Delete the two tables**
 
 Remove `ARMOR_TIERS` (lines 83-96) and `ARMOR_SLOTS` (98-99) entirely. `EquipmentTier.ARMOR_SLOTS`
 replaces the second and the enum replaces the first. The `Items` import may become unused — check
 the rest of the file before removing it.
 
-- [ ] **Step 2: Add the two shared helpers**
+- [x] **Step 2: Add the two shared helpers**
 
 Both are used by `armor`, `tools` and the `create` chain, so they go in once:
 
@@ -1096,7 +1096,7 @@ import net.nuggetmc.tplus.bot.EquipmentTier;
 import org.jetbrains.annotations.Nullable;
 ```
 
-- [ ] **Step 3: Rewrite the `armor` handler and add `tools`**
+- [x] **Step 3: Rewrite the `armor` handler and add `tools`**
 
 Replace the body of `armor`:
 
@@ -1165,7 +1165,7 @@ And the registrations — replace the existing `armor` block:
                         .executes(BotCommands::tools)));
 ```
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 ```bash
 ./gradlew build
@@ -1173,7 +1173,7 @@ And the registrations — replace the existing `armor` block:
 
 Expected: BUILD SUCCESSFUL, 84 unit tests plus the 8 from Task 1.
 
-- [ ] **Step 5: Exercise both commands on a running server**
+- [x] **Step 5: Exercise both commands on a running server**
 
 GameTests never register a command, so this tier is the only thing that runs the tree at all.
 
@@ -1192,7 +1192,7 @@ tier. Available: none, wood, stone, copper, gold, iron, diamond, netherite`**; t
 The two rejections are half the point of the step — they are what proves the slots differ. The
 floor message is the other half: `none` must be accepted there and must say what it did.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/command/BotCommands.java
@@ -1207,7 +1207,7 @@ git commit -m "feat: add /tplus tools and move /tplus armor onto EquipmentTier"
 - Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java:119-132` (registration) and
   `:317-352` (the handler)
 
-- [ ] **Step 1: Replace the registration**
+- [x] **Step 1: Replace the registration**
 
 Brigadier has no optional-in-the-middle argument, so this is a chain of six nodes, each of which
 executes. The depth is passed to the handler because `CommandContext` has no "was this argument
@@ -1247,7 +1247,7 @@ present" query and throws on a missing name.
                                                                 .executes(ctx -> create(ctx, 6)))))))));
 ```
 
-- [ ] **Step 2: Replace the handler**
+- [x] **Step 2: Replace the handler**
 
 ```java
     /**
@@ -1366,7 +1366,7 @@ present" query and throws on a missing name.
     }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```bash
 ./gradlew build
@@ -1374,7 +1374,7 @@ present" query and throws on a missing name.
 
 Expected: BUILD SUCCESSFUL.
 
-- [ ] **Step 4: Walk the whole chain on a running server**
+- [x] **Step 4: Walk the whole chain on a running server**
 
 ```bash
 ./gradlew runServer > /tmp/tplus-server.log 2>&1 &
@@ -1399,7 +1399,7 @@ The log must contain **no `Ambiguity` warning** for the `create` node. A word ar
 integer argument at the same depth would produce one; `count` and `playerlist` are at different
 depths, so there should be none.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/command/BotCommands.java
@@ -1414,7 +1414,7 @@ git commit -m "feat: equip bots from /tplus create"
 - Create: `src/main/java/net/nuggetmc/tplus/bot/EnemyTarget.java`
 - Test: `src/test/java/net/nuggetmc/tplus/bot/EnemyTargetTest.java`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```java
 package net.nuggetmc.tplus.bot;
@@ -1496,7 +1496,7 @@ class EnemyTargetTest {
 }
 ```
 
-- [ ] **Step 2: Run the test and watch it fail**
+- [x] **Step 2: Run the test and watch it fail**
 
 ```bash
 ./gradlew test --tests '*EnemyTargetTest*'
@@ -1504,7 +1504,7 @@ class EnemyTargetTest {
 
 Expected: compilation failure — `cannot find symbol: class EnemyTarget`.
 
-- [ ] **Step 3: Write the record**
+- [x] **Step 3: Write the record**
 
 ```java
 package net.nuggetmc.tplus.bot;
@@ -1572,7 +1572,7 @@ public record EnemyTarget(Set<EntityType<?>> types, Set<UUID> ids, String label)
 }
 ```
 
-- [ ] **Step 4: Run the test and watch it pass**
+- [x] **Step 4: Run the test and watch it pass**
 
 ```bash
 ./gradlew test --tests '*EnemyTargetTest*'
@@ -1585,7 +1585,7 @@ where the item registry did not; add `net.minecraft.server.Bootstrap.bootStrap()
 `@BeforeAll` and say so in the class javadoc. Do not move the test to the GameTest tier — the
 point of decision 3 is that this rule stays here.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/bot/EnemyTarget.java \
@@ -1603,7 +1603,7 @@ git commit -m "feat: add the enemy target value type"
 - Modify: `src/main/java/net/nuggetmc/tplus/bot/Bot.java`
 - Create: `src/gametest/java/net/nuggetmc/tplus/gametest/EnemyTargetTests.java`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/gametest/java/net/nuggetmc/tplus/gametest/EnemyTargetTests.java`:
 
@@ -1798,7 +1798,7 @@ public final class EnemyTargetTests {
 }
 ```
 
-- [ ] **Step 2: Run the tests and watch them fail**
+- [x] **Step 2: Run the tests and watch them fail**
 
 ```bash
 ./gradlew runGameTestServer
@@ -1806,7 +1806,7 @@ public final class EnemyTargetTests {
 
 Expected: compilation failure — `cannot find symbol: variable ENTITY`.
 
-- [ ] **Step 3: Add the goal constant**
+- [x] **Step 3: Add the goal constant**
 
 In `TargetGoal.java`, between `PLAYER` and `NONE` — the two "a target was named for you" goals sit
 together, and `NONE` stays last:
@@ -1830,7 +1830,7 @@ Update the class javadoc, because it currently claims the enum is verbatim:
  */
 ```
 
-- [ ] **Step 4: Add the field to `Bot`**
+- [x] **Step 4: Add the field to `Bot`**
 
 Beside `targetPlayer`:
 
@@ -1858,7 +1858,7 @@ and, beside `setTargetPlayer`:
     }
 ```
 
-- [ ] **Step 5: Add the `Targeting` branch**
+- [x] **Step 5: Add the `Targeting` branch**
 
 In the `switch` in `locateTarget`, after `case PLAYER`:
 
@@ -1890,7 +1890,7 @@ anyway and range is skipped, which makes a single specific target behave exactly
 
 Add `import net.nuggetmc.tplus.bot.EnemyTarget;`.
 
-- [ ] **Step 6: Run the tests and watch them pass**
+- [x] **Step 6: Run the tests and watch them pass**
 
 ```bash
 ./gradlew runGameTestServer
@@ -1898,7 +1898,7 @@ Add `import net.nuggetmc.tplus.bot.EnemyTarget;`.
 
 Expected: all tests pass, six more than before.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/agent/legacy/TargetGoal.java \
@@ -1915,7 +1915,7 @@ git commit -m "feat: add the ENTITY target goal"
 **Files:**
 - Modify: `src/main/java/net/nuggetmc/tplus/command/BotCommands.java`
 
-- [ ] **Step 1: Register the subtree**
+- [x] **Step 1: Register the subtree**
 
 Beside `playertarget`:
 
@@ -1936,7 +1936,7 @@ Beside `playertarget`:
                                 .executes(BotCommands::enemyTargetSpecific))));
 ```
 
-- [ ] **Step 2: Write the four handlers**
+- [x] **Step 2: Write the four handlers**
 
 ```java
     /**
@@ -2083,7 +2083,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 ```
 
-- [ ] **Step 3: Make `playertarget` set the goal too**
+- [x] **Step 3: Make `playertarget` set the goal too**
 
 Replace the tail of `setPlayerTarget`:
 
@@ -2119,7 +2119,7 @@ Replace the tail of `setPlayerTarget`:
     }
 ```
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 ```bash
 ./gradlew build
@@ -2127,7 +2127,7 @@ Replace the tail of `setPlayerTarget`:
 
 Expected: BUILD SUCCESSFUL.
 
-- [ ] **Step 5: Exercise the tree on a running server**
+- [x] **Step 5: Exercise the tree on a running server**
 
 ```bash
 ./gradlew runServer > /tmp/tplus-server.log 2>&1 &
@@ -2156,7 +2156,7 @@ read the type list; `1 entities (cow)`; the clear; and `Goal: ENTITY` still, unc
 No `Ambiguity` warning for the `enemytarget` node. The three children are all literals, so there
 should be none.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/command/BotCommands.java
@@ -2170,7 +2170,7 @@ git commit -m "feat: add /tplus enemytarget and make both targeting commands set
 No code. This is the tier that caught four bugs that 132 GameTests and three RCON sessions did not,
 and this plan touches armour rendering and equipment packets, so it is not optional.
 
-- [ ] **Step 1: Build the production jar and stand up a real server**
+- [x] **Step 1: Build the production jar and stand up a real server**
 
 The dev run is not representative — it bundles the gametest source set and a vanilla client is
 refused by it. Follow `tools/README.md`, including the Windows `win_args.txt` warning.
@@ -2179,7 +2179,7 @@ refused by it. Follow `tools/README.md`, including the Windows `win_args.txt` wa
 ./gradlew jar
 ```
 
-- [ ] **Step 2: Check the things only a screen can check**
+- [x] **Step 2: Check the things only a screen can check**
 
 Join, op yourself **after** joining (offline mode guesses a UUID for a name it has not seen), then:
 
@@ -2187,22 +2187,22 @@ Join, op yourself **after** joining (offline mode guesses a UUID for a name it h
 /tplus create Knight 3 none netherite diamond minecraft:bow
 ```
 
-- [ ] All three bots wear netherite, all four pieces, visible on the model.
-- [ ] All three hold a bow.
-- [ ] `/tplus tools none` then watch one mine — a wooden pickaxe, visibly slower. `none` floors
+- [x] All three bots wear netherite, all four pieces, visible on the model.
+- [x] All three hold a bow.
+- [x] `/tplus tools none` then watch one mine — a wooden pickaxe, visibly slower. `none` floors
       at wood, so there is no bare-handed bot to see.
-- [ ] `/tplus tools netherite` and `/tplus tools wood` on two squads mining the same wall: the
+- [x] `/tplus tools netherite` and `/tplus tools wood` on two squads mining the same wall: the
       difference should be obvious without a stopwatch, roughly 14 ticks a block against 60.
-- [ ] `/tplus armor leather` restyles them and `/tplus armor none` strips them, with no ghost
+- [x] `/tplus armor leather` restyles them and `/tplus armor none` strips them, with no ghost
       pieces left behind. Equipment packets are sent by hand for bots, so a stale slot is exactly
       the kind of thing this tier exists to catch.
-- [ ] `/tplus enemytarget generic zombie` with a zombie nearby: the bots go for the zombie and
+- [x] `/tplus enemytarget generic zombie` with a zombie nearby: the bots go for the zombie and
       ignore you.
-- [ ] `/tplus enemytarget specific @e[type=zombie,limit=1]`: they commit to one zombie and stay on
+- [x] `/tplus enemytarget specific @e[type=zombie,limit=1]`: they commit to one zombie and stay on
       it past other zombies.
-- [ ] Kill it: they stop, rather than switching to you.
+- [x] Kill it: they stop, rather than switching to you.
 
-- [ ] **Step 3: Write down anything that differs**
+- [x] **Step 3: Write down anything that differs**
 
 A finding here is a new task, not a note. Add it before moving on.
 
@@ -2215,7 +2215,7 @@ A finding here is a new task, not a note. Add it before moving on.
 - Modify: `CLAUDE.md`
 - Modify: `docs/backlog.md`
 
-- [ ] **Step 1: Extend Plan B's deviation register**
+- [x] **Step 1: Extend Plan B's deviation register**
 
 Continuing from 21:
 
@@ -2252,7 +2252,7 @@ And record, not as a deviation:
 > The description is upstream's and is kept; the class javadoc now says it is wrong so the next
 > reader does not trust it.
 
-- [ ] **Step 2: Add the 26.2 notes to `CLAUDE.md`**
+- [x] **Step 2: Add the 26.2 notes to `CLAUDE.md`**
 
 Into the "26.2 API notes" list:
 
@@ -2274,7 +2274,7 @@ not ("Components not bound yet"). Design value types to be testable on that side
 `EnemyTarget.matches` takes a type and a UUID rather than an `Entity` for exactly this reason.
 ```
 
-- [ ] **Step 3: Update `docs/backlog.md`**
+- [x] **Step 3: Update `docs/backlog.md`**
 
 Delete the **Loadouts** and **Targeting a specific entity** sections — both are now built. In
 **Ranged attacks**, note that `/tplus create … minecraft:bow` now arms a bot with one and the
@@ -2282,7 +2282,7 @@ missing piece is still the use-tick. In the **Loadouts** section, the claim that
 `Mining.TOOLS` is hardcoded to one iron set is now false, and the whole section goes. In **Bots have no self-preservation**, note armour now exists
 but nothing reads health, so it changes how long they last and not what they do.
 
-- [ ] **Step 4: Full verification from clean**
+- [x] **Step 4: Full verification from clean**
 
 ```bash
 ./gradlew clean build
@@ -2294,7 +2294,7 @@ Expected: **98 unit tests and 143 GameTests**, all passing — 14 and 12 more th
 Run the unit tests with `--rerun-tasks`. Gradle's build cache will otherwise report
 `Task :test FROM-CACHE` in two seconds, which is a legitimate pass but not a run.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs CLAUDE.md
