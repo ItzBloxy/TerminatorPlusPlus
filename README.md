@@ -1,4 +1,4 @@
-# TerminatorPlus++
+# TerminatorPlusPlus
 
 Server-side player bots for **Minecraft 26.2**, as a **NeoForge** mod. They hunt a target, mine
 through walls, tower, clutch out of falls, bridge over lava and fight back.
@@ -41,14 +41,14 @@ Building it yourself needs **JDK 25**:
 /tplus create Hunter 5 none netherite diamond minecraft:bow
 ```
 
-Five bots called Hunter1..Hunter5, in netherite armour, carrying diamond tools and a bow. Then pick
+Five bots called Hunter, in netherite armour, carrying diamond tools and a bow. Then pick
 what they hunt:
 
 ```
 /tplus goal nearestvulnerableplayer
 ```
 
-…and they come for you.
+…and now they'll target you.
 
 ### Creating bots
 
@@ -62,7 +62,7 @@ filler** for the two tier slots:
 | | |
 |---|---|
 | `/tplus create Bob` | one bot |
-| `/tplus create Bob 5` | five, named Bob1..Bob5 |
+| `/tplus create Bob 5` | five bots |
 | `/tplus create "Bot%" 5` | the `%` is where the index goes; quote it |
 | `/tplus create Bob 5 playerlist` | also joins the real player list, so `@a` and the tab list reach them |
 | `/tplus create Bob 5 none diamond` | diamond armour |
