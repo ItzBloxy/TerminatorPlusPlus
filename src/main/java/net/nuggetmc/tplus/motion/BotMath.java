@@ -1,5 +1,8 @@
 package net.nuggetmc.tplus.motion;
 
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
+
 import java.text.DecimalFormat;
 import java.util.Random;
 import java.util.Set;
@@ -83,6 +86,27 @@ public final class BotMath {
 
     public static <E> E getRandomSetElement(Set<E> set) {
         return set.isEmpty() ? null : set.stream().skip(RANDOM.nextInt(set.size())).findFirst().orElse(null);
+    }
+
+    /**
+     * Block-coordinate X, matching Bukkit's {@code Location.getBlockX}.
+     *
+     * <p>Named helpers rather than {@code Mth.floor(pos.x)} at the call site: upstream's
+     * getBlockX/getBlockY/getBlockZ calls are everywhere in the agent, and the named form keeps
+     * the translated code readable against the original.
+     */
+    public static int floorX(Vec3 vec) {
+        return Mth.floor(vec.x);
+    }
+
+    /** Block-coordinate Y. */
+    public static int floorY(Vec3 vec) {
+        return Mth.floor(vec.y);
+    }
+
+    /** Block-coordinate Z. */
+    public static int floorZ(Vec3 vec) {
+        return Mth.floor(vec.z);
     }
 
     public static double square(double n) {

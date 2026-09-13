@@ -19,6 +19,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.nuggetmc.tplus.TerminatorPlus;
+import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
+import net.nuggetmc.tplus.agent.legacy.TargetGoal;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
@@ -75,6 +77,51 @@ public final class BotCommands {
         root.then(Commands.literal("remove")
                 .then(Commands.argument("name", StringArgumentType.string())
                         .executes(BotCommands::removeOne)));
+
+        root.then(Commands.literal("goal")
+                .executes(BotCommands::showGoal)
+                .then(Commands.argument("goal", StringArgumentType.word())
+                        .suggests((ctx, builder) -> {
+                            for (TargetGoal goal : TargetGoal.values()) {
+                                builder.suggest(goal.name().toLowerCase().replace("_", ""));
+                            }
+                            return builder.buildFuture();
+                        })
+                        .executes(BotCommands::setGoal)));
+
+        root.then(Commands.literal("agent")
+                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                        .executes(ctx -> {
+                            boolean on = BoolArgumentType.getBool(ctx, "enabled");
+                            TerminatorPlus.registry().agent().setEnabled(on);
+                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                    "Agent " + (on ? "enabled" : "disabled")), true);
+                            return 1;
+                        })));
+
+        root.then(Commands.literal("drops")
+                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                        .executes(ctx -> {
+                            boolean on = BoolArgumentType.getBool(ctx, "enabled");
+                            TerminatorPlus.registry().agent().setDrops(on);
+                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                    "Bot drops " + (on ? "enabled" : "disabled")), true);
+                            return 1;
+                        })));
+
+        root.then(Commands.literal("offsets")
+                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                        .executes(ctx -> {
+                            boolean on = BoolArgumentType.getBool(ctx, "enabled");
+
+                            if (TerminatorPlus.registry().agent() instanceof LegacyAgent agent) {
+                                agent.offsets = on;
+                            }
+
+                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                    "Target offsets " + (on ? "enabled" : "disabled")), true);
+                            return 1;
+                        })));
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
         root.then(Commands.literal("list").executes(BotCommands::list));
@@ -140,6 +187,37 @@ public final class BotCommands {
         }));
 
         return count;
+    }
+
+    private static int showGoal(CommandContext<CommandSourceStack> ctx) {
+        if (!(TerminatorPlus.registry().agent() instanceof LegacyAgent agent)) {
+            ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
+            return 0;
+        }
+
+        TargetGoal goal = agent.targeting().getTargetType();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Goal: " + goal.name() + " — " + goal.description()), false);
+        return 1;
+    }
+
+    private static int setGoal(CommandContext<CommandSourceStack> ctx) {
+        if (!(TerminatorPlus.registry().agent() instanceof LegacyAgent agent)) {
+            ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
+            return 0;
+        }
+
+        String name = StringArgumentType.getString(ctx, "goal");
+        TargetGoal goal = TargetGoal.from(name);
+
+        if (goal == null) {
+            ctx.getSource().sendFailure(Component.literal("No such goal: '" + name + "'"));
+            return 0;
+        }
+
+        agent.targeting().setTargetType(goal);
+        ctx.getSource().sendSuccess(() -> Component.literal("Goal set to " + goal.name()), true);
+        return 1;
     }
 
     /** Looks up a bot by name and applies {@code action} to it. */

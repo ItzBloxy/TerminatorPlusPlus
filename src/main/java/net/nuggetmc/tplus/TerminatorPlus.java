@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.event.BotDeathEvent;
@@ -35,6 +36,10 @@ public class TerminatorPlus {
     public TerminatorPlus(IEventBus modEventBus, ModContainer modContainer) {
         // Game events (tick, commands, shutdown) live on the NeoForge bus, not the mod bus.
         NeoForge.EVENT_BUS.register(this);
+
+        // The agent the registry drives. Swappable: BotRegistry starts with a no-op, and a
+        // GameTest installs its own.
+        REGISTRY.setAgent(new LegacyAgent(REGISTRY));
         LOGGER.info("TerminatorPlus loading");
     }
 
