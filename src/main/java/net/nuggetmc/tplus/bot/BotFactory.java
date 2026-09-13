@@ -78,24 +78,55 @@ public final class BotFactory {
         return bot;
     }
 
-    /** Sends the packets a client needs in order to draw this bot. */
+    /** Sends the packets every client needs in order to draw this bot. */
     public static void render(Bot bot) {
-        broadcast(bot, new ClientboundAddEntityPacket(
-                bot.getId(),
-                bot.getUUID(),
-                bot.getX(), bot.getY(), bot.getZ(),
-                bot.getXRot(), bot.getYRot(),
-                bot.getType(),
-                0,
-                bot.getDeltaMovement(),
-                bot.getYHeadRot()));
+        for (Packet<?> packet : renderPackets(bot)) {
+            broadcast(bot, packet);
+        }
+    }
 
-        // getNonDefaultValues() replaces the Paper build's NMSUtils, which reflected on
-        // a private Int2ObjectMap that no longer exists in 26.2.
-        broadcast(bot, new ClientboundSetEntityDataPacket(
-                bot.getId(), bot.getEntityData().getNonDefaultValues()));
+    /**
+     * Sends the packets one client needs in order to draw {@code bot}.
+     *
+     * <p>Upstream's {@code onJoin} path. The delay on the final packet is upstream's too: a
+     * client that has only just finished logging in discards entity data sent in the same tick,
+     * and renders the bot as a default skin with no equipment.
+     */
+    public static void renderTo(Bot bot, ServerPlayer target, boolean login) {
+        Packet<?>[] packets = renderPackets(bot);
 
-        broadcast(bot, new ClientboundRotateHeadPacket(bot, (byte) (bot.getYHeadRot() * 256f / 360f)));
+        target.connection.send(packets[0]);
+        target.connection.send(packets[1]);
+
+        BotRegistry registry = bot.getRegistry();
+
+        if (login && registry != null) {
+            registry.scheduler().runLater(10, () -> target.connection.send(packets[2]));
+        } else {
+            target.connection.send(packets[2]);
+        }
+    }
+
+    /** Add-entity, entity-data, rotate-head — in that order. */
+    private static Packet<?>[] renderPackets(Bot bot) {
+        return new Packet<?>[]{
+                new ClientboundAddEntityPacket(
+                        bot.getId(),
+                        bot.getUUID(),
+                        bot.getX(), bot.getY(), bot.getZ(),
+                        bot.getXRot(), bot.getYRot(),
+                        bot.getType(),
+                        0,
+                        bot.getDeltaMovement(),
+                        bot.getYHeadRot()),
+
+                // getNonDefaultValues() replaces the Paper build's NMSUtils, which reflected on
+                // a private Int2ObjectMap that no longer exists in 26.2.
+                new ClientboundSetEntityDataPacket(
+                        bot.getId(), bot.getEntityData().getNonDefaultValues()),
+
+                new ClientboundRotateHeadPacket(bot, (byte) (bot.getYHeadRot() * 256f / 360f))
+        };
     }
 
     /** Removes the bot from clients: entity first, then the tab-list entry. */

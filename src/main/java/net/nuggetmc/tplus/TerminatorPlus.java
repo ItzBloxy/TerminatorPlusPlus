@@ -9,6 +9,13 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.nuggetmc.tplus.bot.Bot;
+import net.nuggetmc.tplus.bot.BotFactory;
+import net.nuggetmc.tplus.event.BotDeathEvent;
 import net.nuggetmc.tplus.command.BotCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +50,55 @@ public class TerminatorPlus {
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
         BotCommands.register(event);
+    }
+
+    /**
+     * Bridges NeoForge's drop event into {@code BotDeathEvent}.
+     *
+     * <p>{@code LivingDropsEvent} is the closest thing vanilla has to Bukkit's staged drop list,
+     * and it is the only point at which clearing the drops still suppresses them.
+     */
+    @SubscribeEvent
+    public void onLivingDrops(LivingDropsEvent event) {
+        if (event.getEntity() instanceof Bot bot) {
+            REGISTRY.agent().onBotDeath(
+                    new BotDeathEvent(bot, event.getSource(), event.getDrops()));
+        }
+    }
+
+    /**
+     * Stops mobs picking bots as a target unless it has been turned on.
+     *
+     * <p>Upstream's {@code onMobTarget}. NeoForge's {@code LivingChangeTargetEvent} is fired for
+     * exactly this, and cancelling it leaves the previous target in place, which is what Bukkit's
+     * cancellation did too.
+     */
+    @SubscribeEvent
+    public void onChangeTarget(LivingChangeTargetEvent event) {
+        if (REGISTRY.isMobTarget()) {
+            return;
+        }
+
+        if (event.getNewAboutToBeSetTarget() instanceof Bot) {
+            event.setCanceled(true);
+        }
+    }
+
+    /**
+     * Renders every live bot to a player who has just joined.
+     *
+     * <p>Upstream's {@code onJoin}. A client that was not connected when a bot spawned has never
+     * been sent its spawn packets, so without this the bot is invisible to them.
+     */
+    @SubscribeEvent
+    public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player) || player instanceof Bot) {
+            return;
+        }
+
+        for (Bot bot : REGISTRY.bots()) {
+            BotFactory.renderTo(bot, player, true);
+        }
     }
 
     @SubscribeEvent

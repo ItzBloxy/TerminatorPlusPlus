@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
@@ -25,6 +26,8 @@ import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
@@ -35,6 +38,9 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.nuggetmc.tplus.TerminatorPlus;
 import net.nuggetmc.tplus.agent.Agent;
+import net.nuggetmc.tplus.event.BotDamageByPlayerEvent;
+import net.nuggetmc.tplus.event.BotFallDamageEvent;
+import net.nuggetmc.tplus.event.BotKilledByPlayerEvent;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.BotPhysics;
 import net.nuggetmc.tplus.motion.GroundCheck;
@@ -583,6 +589,112 @@ public class Bot extends ServerPlayer {
 
     private static final Agent ORPHAN_AGENT = Agent.noop(null);
 
+    // ---- damage -----------------------------------------------------------
+
+    /**
+     * Ported from {@code Bot.hurt(DamageSource, float)}. 26.2 renamed the server-side entry
+     * point to {@code hurtServer} and threads the level through it.
+     *
+     * <p>Four behaviours live here, in upstream's order: the player-damage event (which can
+     * veto or soften the hit), the shield-block sound when the hit is refused, knockback for a
+     * hit the bot survives, and the kill credit for one it does not.
+     */
+    @Override
+    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+        Entity attacker = source.getEntity();
+
+        // Deliberately NOT `&& !(attacker instanceof Bot)`. Bot extends ServerPlayer, so
+        // upstream's `attacker instanceof ServerPlayer` was true for a bot attacker too —
+        // and that is load-bearing: it is how bot-versus-bot kills get counted, through
+        // Agent.onBotKilledByPlayer looking the killer up in the registry.
+        boolean fromPlayer = attacker instanceof ServerPlayer;
+
+        float damage = amount;
+        ServerPlayer killer = null;
+
+        if (fromPlayer) {
+            killer = (ServerPlayer) attacker;
+
+            BotDamageByPlayerEvent event = new BotDamageByPlayerEvent(this, killer, amount);
+            agent().onPlayerDamage(event);
+
+            if (event.isCancelled()) {
+                return false;
+            }
+
+            damage = event.getDamage();
+        }
+
+        boolean damaged = super.hurtServer(level, source, damage);
+
+        // Upstream keyed this off its own `blocking` flag rather than vanilla isBlocking(),
+        // and the two can disagree — see isBotBlocking. Kept as upstream had it.
+        if (!damaged && blocking) {
+            level.playSound(null, blockPosition(), SoundEvents.SHIELD_BLOCK.value(),
+                    SoundSource.PLAYERS, 1f, 1f);
+        }
+
+        if (damaged && attacker != null) {
+            if (fromPlayer && !isAlive()) {
+                agent().onBotKilledByPlayer(new BotKilledByPlayerEvent(this, killer));
+            } else {
+                kb(position(), attacker.position(), attacker);
+            }
+        }
+
+        return damaged;
+    }
+
+    /**
+     * Knockback, ported from {@code Bot.kb}.
+     *
+     * <p>Two upstream oddities, both preserved. It <b>replaces</b> the velocity rather than
+     * adding to it, so a hit cancels whatever the bot was doing. And it reads the Knockback
+     * enchantment off the attacker's main hand, which is the only place in the whole plugin that
+     * any enchantment is consulted.
+     */
+    private void kb(Vec3 self, Vec3 attackerPos, Entity attacker) {
+        MotionVec vel = MotionVec.of(self.subtract(attackerPos)).setY(0).normalize().multiply(0.3);
+
+        if (isBotOnGround()) {
+            vel.multiply(0.8).setY(0.4);
+        }
+
+        if (attacker instanceof LivingEntity living) {
+            int level = knockbackLevel(living);
+
+            if (level == 1) {
+                vel.multiply(1.05).setY(0.4);
+            } else if (level > 1) {
+                vel.multiply(1.9).setY(0.4);
+            }
+        }
+
+        // A hit from exactly the bot's own position normalises to NaN, and setVelocity would
+        // write that straight into the physics vector. Upstream could not reach this because
+        // Bukkit's Vector threw instead; see the same guard in look().
+        if (BotMath.isNotFinite(vel)) {
+            BotMath.clean(vel);
+        }
+
+        setVelocity(vel);
+    }
+
+    /**
+     * Knockback enchantment level on the attacker's main hand, or 0.
+     *
+     * <p>26.2 keeps enchantments in a data component and looks them up through a registry
+     * holder, so the Bukkit {@code ItemMeta.hasEnchant} test becomes a registry lookup plus an
+     * {@code EnchantmentHelper} query.
+     */
+    private int knockbackLevel(LivingEntity attacker) {
+        return attacker.level().registryAccess()
+                .lookup(Registries.ENCHANTMENT)
+                .flatMap(registry -> registry.get(Enchantments.KNOCKBACK))
+                .map(holder -> EnchantmentHelper.getItemEnchantmentLevel(holder, attacker.getMainHandItem()))
+                .orElse(0);
+    }
+
     void incrementAliveTicks() {
         aliveTicks++;
     }
@@ -716,7 +828,14 @@ public class Bot extends ServerPlayer {
             return;
         }
 
-        hurtServer((ServerLevel) level(), damageSources().fall(), (float) Math.pow(3.6, -oldY));
+        // The copy is upstream's (new ArrayList<>(getStandingOn())) and matters: the handler
+        // places blocks, which makes checkGround recompute standingOn underneath it.
+        BotFallDamageEvent event = new BotFallDamageEvent(this, List.copyOf(getStandingOn()));
+        agent().onFallDamage(event);
+
+        if (!event.isCancelled()) {
+            hurtServer((ServerLevel) level(), damageSources().fall(), (float) Math.pow(3.6, -oldY));
+        }
     }
 
     /**
