@@ -9933,14 +9933,31 @@ the commit message. The sanctioned ones, for reference:
     `LinkedHashSet`. Both of upstream's were `HashSet`s, so which of two equally good neighbours
     or candidates won was unspecified — ours is the same choice every time (Task 23).
 
+17. `/tplus region` takes two block positions and covers both blocks entirely, where upstream
+    took six raw doubles and used them as the bounds. Selecting two corners is what an operator
+    means; the message reports the blocks they typed rather than the exclusive upper bound
+    (Task 24).
+18. `/tplus region`'s weights are optional, where upstream had a `strict` keyword for the
+    hard-boundary form and **rejected** a weight of zero. Omitting them is the same thing as
+    `strict`, and an explicit zero now means the same as omitting it (Task 24).
+
 Found by the Task 24 audit and **fixed rather than sanctioned**: four `faceLocation` calls aimed
 at a block's centre where upstream aimed at its lower corner, because a Bukkit block `Location`
 *is* the lower corner. `Mining.preBreak`'s AT case was half a block out in Y, and the footprint
 scan, the pre-MLG and the clutch were half a block out in X and Z. All cosmetic — they only move
 where a bot's head points — and all now match.
 
-Two more that are **not** deviations but look like them from the diff, and cost a reviewer time
-in the phase 5/6 pass:
+Found by the phase 7 review and **fixed rather than sanctioned**: upstream's `/bot settings
+region` with no arguments reports the current region, and that form was missing. It was invisible
+from the outside and obvious from the inside — `Targeting.getRegion` and its three weight
+accessors had no callers at all, which is the shape a missing report command leaves behind.
+
+Three more that are **not** deviations but look like them from the diff, and cost a reviewer time
+in the phase 5/6 and phase 7 passes:
+
+- `Navigation.checkSide` can never return 2, so `tickBot`'s `case 2` is unreachable. `checkNearby`
+  only ever produces a side offset, ABOVE or BELOW, and every one of those maps to 0. Upstream is
+  identical; the dead arm is faithfully dead.
 
 - `Mining.adjustForLava` returns early from its first branch where upstream fell through to a
   second `if`. Equivalent: the first branch sets `cur = block`, which makes the second's

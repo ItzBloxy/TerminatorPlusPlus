@@ -210,6 +210,47 @@ public final class SurroundingScanTests {
 
     @GameTest(timeoutTicks = 200)
     @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_wedged_bot_scans_the_block_over_its_head")
+    static void a_wedged_bot_scans_the_block_over_its_head(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        LegacyAgent agent = new LegacyAgent(registry);
+        registry.setAgent(agent);
+
+        // The last branch of the scan, and the only one that looks at the bot rather than at
+        // what is in front of it: nothing ahead at any of the three heights, but the bot is
+        // wedged on its own footing. A bot standing on a fence post is upstream's example --
+        // the footing is one block below the bot's own block AND is a fence.
+        helper.setBlock(new BlockPos(7, 0, 7), Blocks.AIR);
+        helper.setBlock(new BlockPos(7, 1, 7), Blocks.OAK_FENCE);
+        helper.setBlock(new BlockPos(7, 4, 7), Blocks.STONE);
+
+        Bot bot = spawn(helper, registry,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(7, 3, 7))), "Wedged");
+        Bot target = spawn(helper, registry,
+                Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(7, 1, 3))), "Quarry");
+
+        // Let it settle onto the fence. A fence is 1.5 high, so the bot ends at 2.5 and its own
+        // block is 2 -- one above the footing, which is what makes it "obstructed".
+        for (int i = 0; i < 20; i++) {
+            bot.tick();
+            target.tick();
+        }
+
+        SurroundingScan scan = new SurroundingScan(registry.state(), registry.agent(),
+                new Mining(registry.state(), registry.agent()));
+
+        // With air under the fence the bot will not mine its own footing away, so the scan goes
+        // for the block over its head instead.
+        helper.assertValueEqual(scan.checkNearby(bot, target), ScanOffset.ABOVE,
+                "a wedged bot with something overhead must mine upward; standing on "
+                        + bot.getStandingOn() + " at " + bot.position());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "15x6x15", floor = true)
     @TestHolder("an_open_path_scans_to_nothing")
     static void an_open_path_scans_to_nothing(ExtendedGameTestHelper helper) {
         Fixture f = fixture(helper, Direction.NORTH);

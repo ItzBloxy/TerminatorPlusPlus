@@ -168,6 +168,7 @@ public final class BotCommands {
         // Seven arguments in the worst case, so the coordinates come as two block positions
         // and the weights are optional on the end.
         root.then(Commands.literal("region")
+                .executes(BotCommands::showRegion)
                 .then(Commands.literal("clear").executes(BotCommands::clearRegion))
                 .then(Commands.argument("from", BlockPosArgument.blockPos())
                         .then(Commands.argument("to", BlockPosArgument.blockPos())
@@ -423,7 +424,7 @@ public final class BotCommands {
         if (pieces == null) {
             ctx.getSource().sendFailure(Component.literal(
                     "'" + tier + "' is not a valid tier. Available: "
-                            + String.join(", ", ARMOR_TIERS.keySet())));
+                            + ARMOR_TIERS.keySet().stream().sorted().collect(Collectors.joining(", "))));
             return 0;
         }
 
@@ -512,6 +513,41 @@ public final class BotCommands {
         return 1;
     }
 
+    /**
+     * Reports the current region.
+     *
+     * <p>Upstream's {@code /bot settings region} with no arguments. Its absence here was
+     * invisible until a review noticed that {@code Targeting.getRegion} and the three weight
+     * accessors had no callers at all — which is what a missing report command looks like from
+     * the inside. {@code goal} and {@code mobtarget} both have the same no-argument form.
+     */
+    private static int showRegion(CommandContext<CommandSourceStack> ctx) {
+        LegacyAgent agent = legacyAgent(ctx);
+
+        if (agent == null) {
+            return 0;
+        }
+
+        AABB region = agent.targeting().getRegion();
+
+        if (region == null) {
+            ctx.getSource().sendSuccess(() -> Component.literal("No region is set."), false);
+            return 1;
+        }
+
+        double wx = agent.targeting().getRegionWeightX();
+        double wy = agent.targeting().getRegionWeightY();
+        double wz = agent.targeting().getRegionWeightZ();
+
+        String detail = wx == 0 && wy == 0 && wz == 0
+                ? "\n  Entities outside it are not targeted at all."
+                : "\n  Weights: " + wx + ", " + wy + ", " + wz;
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Region: " + describe(region) + detail), false);
+        return 1;
+    }
+
     private static int clearRegion(CommandContext<CommandSourceStack> ctx) {
         LegacyAgent agent = legacyAgent(ctx);
 
@@ -524,9 +560,16 @@ public final class BotCommands {
         return 1;
     }
 
+    /**
+     * The box as the two blocks an operator selected.
+     *
+     * <p>The maxima are one less than the AABB's, because a box that covers block 32 entirely
+     * ends at 33.0. Printing the raw bound tells an operator who typed 32 that they got 33.
+     */
     private static String describe(AABB region) {
         return "[" + (int) region.minX + ", " + (int) region.minY + ", " + (int) region.minZ
-                + "] to [" + (int) region.maxX + ", " + (int) region.maxY + ", " + (int) region.maxZ + "]";
+                + "] to [" + ((int) region.maxX - 1) + ", " + ((int) region.maxY - 1)
+                + ", " + ((int) region.maxZ - 1) + "]";
     }
 
     /** The installed agent, or null with a message already sent to the source. */

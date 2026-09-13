@@ -5,7 +5,6 @@ import net.minecraft.world.phys.Vec3;
 
 import java.text.DecimalFormat;
 import java.util.Random;
-import java.util.Set;
 
 /**
  * Vector and angle helpers. Ported from the Paper build's {@code MathUtils}; see
