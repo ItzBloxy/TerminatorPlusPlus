@@ -123,6 +123,25 @@ class EquipmentTierTest {
     }
 
     @Test
+    void theToolsSlotFloorsAtWood() {
+        // `none` parses in the tools slot because it is the create chain's filler, but there is
+        // no bare-handed tier: break progress is the tool's destroy speed and an empty hand
+        // scores 1.0 against everything.
+        assertSame(EquipmentTier.WOOD, EquipmentTier.NONE.asToolTier());
+
+        for (EquipmentTier tier : EquipmentTier.values()) {
+            if (tier != EquipmentTier.NONE) {
+                assertSame(tier, tier.asToolTier(), tier.id() + " must be left alone");
+            }
+
+            if (tier.acceptsAsTools()) {
+                assertFalse(tier.asToolTier().tools().isEmpty(),
+                        tier.id() + " parses in the tools slot and must yield real tools");
+            }
+        }
+    }
+
+    @Test
     void theSuggestionListsAgreeWithWhatParses() {
         // The command's completions and its rejection message both read these two lists, so a
         // tier that tab-completes but then fails to parse is impossible by construction.

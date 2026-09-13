@@ -17,6 +17,7 @@ import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.agent.AgentState;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
+import net.nuggetmc.tplus.bot.EquipmentTier;
 import net.nuggetmc.tplus.motion.MotionVec;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,23 +37,25 @@ import java.util.Set;
  */
 public final class Mining {
 
+    /** Ticks between runs of the break task. Upstream's, unchanged. */
+    private static final int BREAK_PERIOD = 2;
+
     /**
-     * The tools a bot will consider. Upstream's {@code LegacyItems}: one iron tool of each kind,
-     * so a bot never holds a diamond pickaxe it did not earn.
+     * Break progress one crack stage costs.
      *
-     * <p>Spec §4.4 folds {@code LegacyItems} into {@code BlockRules}. These are items, and a
-     * block-rules class is the wrong home; they live next to the only code that reads them.
-     *
-     * <p>{@code Item} constants, not {@code ItemStack}s. Constructing a stack in a static
-     * initialiser throws "Components not bound yet" — the constructor reads the item's default
-     * data components, and those are bound during registry load. As a static field that breaks
-     * mod loading outright, which is how this was found. Upstream built its stacks inside the
-     * loop too.
+     * <p>Defined as <b>iron's progress in one run</b>: iron's mining speed is 6.0 and the task
+     * runs every {@value #BREAK_PERIOD} ticks. An iron bot therefore advances exactly one stage
+     * per run and breaks a block in twenty ticks, which is upstream's flat behaviour reproduced
+     * by construction rather than by coincidence. Every other tier is faster or slower than that
+     * anchor: wood 60 ticks, stone 30, copper 24, diamond 15, netherite 14, gold 10.
      */
-    private static final List<Item> TOOLS = List.of(
-            Items.IRON_PICKAXE,
-            Items.IRON_AXE,
-            Items.IRON_SHOVEL);
+    private static final int STAGE_COST = 12;
+
+    /** Crack stages a block goes through. A protocol constant: the packet carries 0..9. */
+    private static final int STAGES = 10;
+
+    /** Progress that breaks a block. */
+    static final int BREAK_COST = STAGE_COST * STAGES;
 
     /** Pitch while breaking a block one level below eye height. Upstream's magic number. */
     static final float PITCH_DOWN = 69f;
@@ -94,7 +97,7 @@ public final class Mining {
         ServerLevel level = (ServerLevel) bot.level();
         BlockState target = level.getBlockState(pos);
 
-        bot.setItem(optimalTool(target));
+        bot.setItem(optimalTool(bot.getToolTier(), target));
 
         if (offset.isSideDown() || offset.isSideDown2()) {
             bot.setBotPitch(PITCH_DOWN);
@@ -124,8 +127,16 @@ public final class Mining {
     /**
      * Starts the progress counter that eventually breaks the block at {@code pos}.
      *
-     * <p>Ported from {@code blockBreakEffect}. One task per block, ticking every 2 ticks through
-     * ten stages. Three things make it more than a counter:
+     * <p>Ported from {@code blockBreakEffect}. One task per block, ticking every
+     * {@value #BREAK_PERIOD} ticks through ten crack stages.
+     *
+     * <p><b>Divergence:</b> upstream advanced one fixed stage per run, so every block took twenty
+     * ticks whatever the bot held and whatever it was breaking. Progress here is the held tool's
+     * destroy speed against the block, so a bot's tool tier decides how fast it tunnels — see
+     * {@link #STAGE_COST}, which is set so that iron still takes exactly twenty. Block
+     * <i>hardness</i> is still ignored, as upstream ignored it.
+     *
+     * <p>Three things make it more than a counter:
      *
      * <ul>
      * <li>It re-derives its target from the bot's <em>current</em> position each tick, through
@@ -162,8 +173,8 @@ public final class Mining {
         // first run.
         int[] taskId = new int[1];
 
-        taskId[0] = agent.repeating(2, () -> {
-            byte stage = state.mining.getOrDefault(taskId[0], (byte) 0);
+        taskId[0] = agent.repeating(BREAK_PERIOD, () -> {
+            short progress = state.mining.getOrDefault(taskId[0], (short) 0);
 
             BlockPos current = currentTarget(bot, wrapper);
             current = adjustForLava(bot, level, pos, current, wrapper);
@@ -178,9 +189,24 @@ public final class Mining {
                 return;
             }
 
-            SoundEvent sound = LegacyUtils.breakBlockSound(level.getBlockState(pos));
+            BlockState target = level.getBlockState(pos);
+            SoundEvent sound = LegacyUtils.breakBlockSound(target);
 
-            if (stage == 9) {
+            // Upstream advanced one fixed stage per run, so every block took twenty ticks
+            // whatever the bot held. Progress is now the held tool's destroy speed against this
+            // block, which is the whole point of a bot having a tool tier. Block *hardness* is
+            // still ignored, as upstream ignored it: a bot tunnels at a rate set by its tools
+            // and not by what it is tunnelling through.
+            float speed = bot.getMainHandItem().getDestroySpeed(target);
+            short next = (short) (progress + Math.max(1, Math.round(speed * BREAK_PERIOD)));
+
+            // Read before the destroy branch, where upstream read it after. Upstream was safe
+            // because an unbreakable block never advanced a stage and so never reached nine;
+            // progress is no longer capped at one step per run, so a netherite bot would
+            // overshoot straight past the check and destroy bedrock.
+            boolean unbreakable = UNBREAKABLE.contains(target.getBlock());
+
+            if (!unbreakable && next >= BREAK_COST) {
                 if (sound != null) {
                     level.playSound(null, pos, sound, SoundSource.BLOCKS, 1f, 1f);
                 }
@@ -202,20 +228,23 @@ public final class Mining {
                 level.playSound(null, pos, sound, SoundSource.BLOCKS, 0.3f, 1f);
             }
 
-            if (UNBREAKABLE.contains(level.getBlockState(pos).getBlock())) {
+            // No store, so the task spins here forever rather than stopping. Faithfully
+            // wasteful, and unchanged: the sound still plays every run on an unbreakable block.
+            if (unbreakable) {
                 return;
             }
 
-            if (BlockRules.isInstantBreak(level.getBlockState(pos))) {
+            if (BlockRules.isInstantBreak(target)) {
                 level.destroyBlock(pos, true, bot);
                 return;
             }
 
-            BotFactory.broadcastCrack(bot, state.crackList.get(ref), pos, stage);
-            state.mining.put(taskId[0], (byte) (stage + 1));
+            BotFactory.broadcastCrack(bot, state.crackList.get(ref), pos,
+                    Math.min(STAGES - 1, next / STAGE_COST));
+            state.mining.put(taskId[0], next);
         });
 
-        state.mining.put(taskId[0], (byte) 0);
+        state.mining.put(taskId[0], (short) 0);
     }
 
     /** Clears the overlay and forgets the block. */
@@ -401,18 +430,22 @@ public final class Mining {
     }
 
     /**
-     * The fastest of the three tools against {@code target}, or an empty hand.
+     * The fastest of {@code tier}'s tools against {@code target}, or an empty hand.
      *
      * <p>Ported from {@code preBreak}'s tool loop. Upstream compared Bukkit's
      * {@code Block.getDestroySpeed(tool)} against a starting value of 1, so a block no tool helps
      * with leaves the bot bare-handed. {@code ItemStack.getDestroySpeed(BlockState)} is the
      * vanilla equivalent and is the tool's multiplier for that block, same orientation.
+     *
+     * <p>The tier is a parameter rather than the static {@code LegacyItems} list upstream had, so
+     * two bots can carry different tools — and since {@link #blockBreakEffect} accrues the held
+     * stack's destroy speed, this is also what decides how fast the block comes down.
      */
-    static ItemStack optimalTool(BlockState target) {
+    static ItemStack optimalTool(EquipmentTier tier, BlockState target) {
         ItemStack optimal = ItemStack.EMPTY;
         float optimalSpeed = 1;
 
-        for (Item item : TOOLS) {
+        for (Item item : tier.tools()) {
             ItemStack tool = new ItemStack(item);
             float speed = tool.getDestroySpeed(target);
 

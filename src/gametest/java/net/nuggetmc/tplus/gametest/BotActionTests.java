@@ -3,6 +3,7 @@ package net.nuggetmc.tplus.gametest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -13,10 +14,14 @@ import net.neoforged.testframework.gametest.EmptyTemplate;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
 import net.neoforged.testframework.gametest.GameTest;
 import net.nuggetmc.tplus.agent.legacy.BlockRules;
+import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
+import net.nuggetmc.tplus.agent.legacy.Mining;
+import net.nuggetmc.tplus.agent.legacy.ScanOffset;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.bot.EquipmentTier;
 import net.nuggetmc.tplus.motion.MotionVec;
 
 /**
@@ -42,6 +47,204 @@ public final class BotActionTests {
 
         return BotFactory.spawn(registry, level, pos, 0f, 0f,
                 BotGameProfiles.create("ActionBot", null), false);
+    }
+
+    /** A bot with a tier, and a stone block in its head space, which is where ScanOffset.AT points. */
+    private static Bot miner(ExtendedGameTestHelper helper, BotRegistry registry,
+                             int x, int z, EquipmentTier tier) {
+        Bot bot = spawn(helper, registry, new BlockPos(x, 1, z));
+        bot.setToolTier(tier);
+        helper.setBlock(new BlockPos(x, 2, z), Blocks.STONE);
+        return bot;
+    }
+
+    private static boolean isAir(ExtendedGameTestHelper helper, int x, int y, int z) {
+        return helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z))).isAir();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("a_bot_mines_with_the_tier_it_was_given")
+    static void a_bot_mines_with_the_tier_it_was_given(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = miner(helper, registry, 3, 3, EquipmentTier.NETHERITE);
+
+        // A direct preBreak call, not 200 ticks of hunting. move() adds Math.random() to every
+        // jump, so a ticked test measures the walk rather than the tool choice.
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.NETHERITE_PICKAXE),
+                "a netherite bot must mine stone with its own pickaxe, not an iron one");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("the_default_tool_tier_is_upstreams_iron")
+    static void the_default_tool_tier_is_upstreams_iron(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        // Nothing calls setToolTier. This is the test that keeps making the tier configurable a
+        // change in capability rather than a change in behaviour.
+        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
+        helper.setBlock(new BlockPos(3, 2, 3), Blocks.STONE);
+
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.IRON_PICKAXE),
+                "an unconfigured bot must still mine with iron");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("the_none_tier_floors_at_wood")
+    static void the_none_tier_floors_at_wood(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
+        bot.setToolTier(EquipmentTier.NONE);
+
+        // `none` has to parse in the tools slot because it is the create chain's filler word,
+        // but a bare-handed bot scores 1.0 against everything and would take 120 ticks a block --
+        // six times upstream's twenty, as the result of skipping an argument.
+        helper.assertTrue(bot.getToolTier() == EquipmentTier.WOOD,
+                "the none tier must floor at wood for tools");
+
+        helper.setBlock(new BlockPos(3, 2, 3), Blocks.STONE);
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.WOODEN_PICKAXE),
+                "and it must mine with a wooden pickaxe, not an empty hand");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("iron_still_breaks_a_block_in_twenty_ticks")
+    static void iron_still_breaks_a_block_in_twenty_ticks(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = miner(helper, registry, 3, 3, EquipmentTier.IRON);
+
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        // Only the scheduler is ticked, deliberately: ticking the registry would run the agent,
+        // the agent moves bots, and the break task cancels itself the moment the bot is no
+        // longer aiming at the block. Ticking the scheduler alone makes this exact.
+        int ticks = 0;
+
+        for (int tick = 1; tick <= 100 && ticks == 0; tick++) {
+            registry.scheduler().tick();
+
+            if (isAir(helper, 3, 2, 3)) {
+                ticks = tick;
+            }
+        }
+
+        // The anchor for the whole speed change. Upstream advanced one fixed stage every two
+        // ticks, so every block took twenty ticks whatever the bot held; STAGE_COST is defined
+        // as iron's progress in one run precisely so that iron still does. If this number moves,
+        // the speed model has drifted off upstream rather than extended it.
+        helper.assertValueEqual(ticks, 20, "iron must still break a block in exactly twenty ticks");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x5x7", floor = true)
+    @TestHolder("a_better_tool_breaks_a_block_sooner")
+    static void a_better_tool_breaks_a_block_sooner(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+        Mining mining = new Mining(registry.state(), registry.agent());
+
+        // Three bots in three columns. They do not interact: each break task is keyed on its own
+        // block position and re-derives its target from its own bot.
+        Bot wood = miner(helper, registry, 2, 3, EquipmentTier.WOOD);
+        Bot iron = miner(helper, registry, 6, 3, EquipmentTier.IRON);
+        Bot netherite = miner(helper, registry, 10, 3, EquipmentTier.NETHERITE);
+
+        mining.preBreak(wood, helper.absolutePos(new BlockPos(2, 2, 3)), ScanOffset.AT);
+        mining.preBreak(iron, helper.absolutePos(new BlockPos(6, 2, 3)), ScanOffset.AT);
+        mining.preBreak(netherite, helper.absolutePos(new BlockPos(10, 2, 3)), ScanOffset.AT);
+
+        int woodTicks = 0;
+        int ironTicks = 0;
+        int netheriteTicks = 0;
+
+        // One scheduler drives all three, so they are measured against the same clock rather
+        // than in three separate runs. Wood is the slowest at 60 ticks, so it ends the loop.
+        for (int tick = 1; tick <= 100 && woodTicks == 0; tick++) {
+            registry.scheduler().tick();
+
+            if (netheriteTicks == 0 && isAir(helper, 10, 2, 3)) {
+                netheriteTicks = tick;
+            }
+            if (ironTicks == 0 && isAir(helper, 6, 2, 3)) {
+                ironTicks = tick;
+            }
+            if (woodTicks == 0 && isAir(helper, 2, 2, 3)) {
+                woodTicks = tick;
+            }
+        }
+
+        // Asserted as an ordering rather than three exact numbers: the exact ones are pinned by
+        // iron_still_breaks_a_block_in_twenty_ticks, and this is the property that makes the
+        // tier worth setting at all.
+        helper.assertTrue(netheriteTicks > 0 && netheriteTicks < ironTicks,
+                "netherite (" + netheriteTicks + ") must beat iron (" + ironTicks + ")");
+        helper.assertTrue(ironTicks > 0 && ironTicks < woodTicks,
+                "iron (" + ironTicks + ") must beat wood (" + woodTicks + ")");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "5x5x5", floor = true)
+    @TestHolder("a_tier_lands_in_the_right_four_armour_slots")
+    static void a_tier_lands_in_the_right_four_armour_slots(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(2, 1, 2));
+
+        EquipmentTier.DIAMOND.equipArmor(bot);
+
+        // EquipmentTierTest pins armorPiece(i) against ARMOR_SLOTS[i], but only inside the table.
+        // This is the pairing itself: transpose the two and a bot wears its boots on its head,
+        // which nothing else in the codebase would notice and which no unit test can reach,
+        // because equipping builds ItemStacks.
+        helper.assertTrue(bot.getItemBySlot(EquipmentSlot.FEET).is(Items.DIAMOND_BOOTS), "feet");
+        helper.assertTrue(bot.getItemBySlot(EquipmentSlot.LEGS).is(Items.DIAMOND_LEGGINGS), "legs");
+        helper.assertTrue(bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE), "chest");
+        helper.assertTrue(bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET), "head");
+
+        // NONE strips all four through the same loop that filled them -- armorPiece returns null
+        // past the end of its empty array rather than throwing.
+        EquipmentTier.NONE.equipArmor(bot);
+
+        for (EquipmentSlot slot : EquipmentTier.ARMOR_SLOTS) {
+            helper.assertTrue(bot.getItemBySlot(slot).isEmpty(), "the none tier must strip " + slot);
+        }
+
+        registry.reset();
+        helper.succeed();
     }
 
     @GameTest

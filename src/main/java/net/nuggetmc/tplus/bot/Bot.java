@@ -92,6 +92,17 @@ public class Bot extends ServerPlayer {
     private final MotionVec offset = BotMath.circleOffset(3);
 
     private UUID targetPlayer;
+
+    /**
+     * What {@code Mining.optimalTool} may choose from, and therefore how fast this bot breaks a
+     * block.
+     *
+     * <p>Upstream had no such field: {@code LegacyItems} was one static iron set for every bot.
+     * Defaulting to {@link EquipmentTier#IRON} is that set exactly, so making this configurable
+     * changed what a bot <i>can</i> do and not what an unconfigured one does.
+     */
+    private EquipmentTier toolTier = EquipmentTier.IRON;
+
     private int kills;
 
     private boolean shield;
@@ -579,6 +590,21 @@ public class Bot extends ServerPlayer {
 
     public void setTargetPlayer(UUID target) {
         this.targetPlayer = target;
+    }
+
+    public EquipmentTier getToolTier() {
+        return toolTier;
+    }
+
+    /**
+     * Sets the tier {@code Mining.optimalTool} may choose from.
+     *
+     * <p>{@link EquipmentTier#NONE} floors at {@link EquipmentTier#WOOD}. The clamp is applied
+     * here rather than at the command so that no caller can route around it and leave a bot
+     * bare-handed, which is 120 ticks a block against upstream's flat twenty.
+     */
+    public void setToolTier(EquipmentTier tier) {
+        this.toolTier = tier.asToolTier();
     }
 
     /**

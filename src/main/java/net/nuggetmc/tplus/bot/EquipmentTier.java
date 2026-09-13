@@ -2,6 +2,7 @@ package net.nuggetmc.tplus.bot;
 
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.jetbrains.annotations.Nullable;
 
@@ -137,5 +138,40 @@ public enum EquipmentTier {
     /** Pickaxe, axe, shovel. Empty for a tier with no tools and for {@link #NONE}. */
     public List<Item> tools() {
         return List.of(tools);
+    }
+
+    /**
+     * This tier when it is used for tools: {@link #NONE} becomes {@link #WOOD}.
+     *
+     * <p>{@code none} has to parse in the tools slot because it is the {@code /tplus create}
+     * chain's filler word, but there is no bare-handed tier — break progress is the held tool's
+     * destroy speed, and an empty hand scores 1.0 against everything, which is 120 ticks a block.
+     *
+     * <p>One definition, called by both {@code Bot.setToolTier} and the commands' feedback, so
+     * the clamp and the message an operator reads cannot disagree.
+     */
+    public EquipmentTier asToolTier() {
+        return this == NONE ? WOOD : this;
+    }
+
+    /**
+     * Puts this tier's four pieces on a bot, clearing any slot the tier has nothing for.
+     *
+     * <p>{@link #NONE} strips all four through this same loop: {@link #armorPiece(int)} returns
+     * null past the end of its empty array.
+     *
+     * <p>Upstream wrote the Bukkit inventory <i>and</i> sent the equipment packets, with the
+     * comment "packet sending to ensure"; {@code Bot.setItem(stack, slot)} already does both, so
+     * one call per slot is enough.
+     *
+     * <p>Lives here rather than in {@code BotCommands} so the index-to-slot pairing sits beside
+     * the table it indexes, and so a GameTest can reach it.
+     */
+    public void equipArmor(Bot bot) {
+        for (int i = 0; i < ARMOR_SLOTS.length; i++) {
+            Item piece = armorPiece(i);
+
+            bot.setItem(piece == null ? ItemStack.EMPTY : new ItemStack(piece), ARMOR_SLOTS[i]);
+        }
     }
 }

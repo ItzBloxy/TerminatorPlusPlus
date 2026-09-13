@@ -78,8 +78,15 @@ public final class AgentState {
      */
     public final Map<BlockRef, Short> crackList = new HashMap<>();
 
-    /** Mining task id to progress stage, 0 through 9. */
-    public final Map<Integer, Byte> mining = new HashMap<>();
+    /**
+     * Mining task id to accumulated break progress, 0 to {@code Mining.BREAK_COST}.
+     *
+     * <p>Was the crack stage, 0 through 9, when every block took a fixed twenty ticks. It is now
+     * progress, because a stage is no longer a fixed number of ticks — see
+     * {@code Mining.blockBreakEffect}. {@code Short} rather than {@code Byte} because a fast tool
+     * can push progress past 127 in the run that breaks the block.
+     */
+    public final Map<Integer, Short> mining = new HashMap<>();
 
     /** Bots that took fall damage recently and must not be shoved downward again. */
     public final Set<Bot> fallDamageCooldown = new HashSet<>();
