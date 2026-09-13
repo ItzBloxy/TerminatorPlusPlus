@@ -49,6 +49,7 @@ public final class LegacyAgent extends Agent {
     private final BotBehaviors behaviors;
     private final Mining mining;
     private final BlockScan blockScan;
+    private final SurroundingScan surroundingScan;
 
     /** Whether bots aim at a ring around the target rather than the target itself. */
     public boolean offsets = true;
@@ -58,10 +59,15 @@ public final class LegacyAgent extends Agent {
 
         this.state = registry.state();
         this.targeting = new Targeting(registry);
+        // Construction order is a dependency order, and it only works because BotBehaviors
+        // stopped needing Navigation in task 18. The plan expected a cycle here and budgeted a
+        // setter for it; resetHand's one call into Navigation turned out to be Mining's
+        // stopMining, so there is nothing to break.
         this.mining = new Mining(state, this);
         this.blockScan = new BlockScan(state, this);
-        this.navigation = new Navigation(state, this, mining, blockScan);
+        this.surroundingScan = new SurroundingScan(state, this, mining);
         this.behaviors = new BotBehaviors(state, mining);
+        this.navigation = new Navigation(state, this, mining, blockScan, surroundingScan, behaviors);
     }
 
     public Targeting targeting() {
@@ -200,7 +206,9 @@ public final class LegacyAgent extends Agent {
                 return;
             }
 
-            // Task 21 inserts checkSide here, guarded on bothXZ.
+            if (bothXZ) {
+                sideResult = navigation.checkSide(bot, livingTarget);
+            }
 
             switch (sideResult) {
                 case 1:

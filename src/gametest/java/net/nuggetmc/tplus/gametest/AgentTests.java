@@ -370,10 +370,16 @@ public final class AgentTests {
 
         // preBreak runs every tick while the bot is blocked, and the containsKey guard is the
         // only thing stopping it stacking one swing task per tick.
-        helper.assertTrue(registry.state().miningAnim.containsKey(bot),
-                "an animation must be running");
-        helper.assertValueEqual(registry.state().miningAnim.size(), 1,
-                "exactly one animation, not sixty");
+        Integer first = registry.state().miningAnim.get(bot);
+        helper.assertTrue(first != null, "an animation must be running");
+
+        run(registry, 20);
+
+        // The same task twenty ticks later, not the twentieth of twenty. Asserting on the size
+        // of the map instead was wrong as soon as check 15 was wired: the other bot scans its
+        // own surroundings and legitimately gets an animation of its own.
+        helper.assertValueEqual(registry.state().miningAnim.get(bot), first,
+                "the same animation task, not a new one every tick");
 
         registry.reset();
         helper.succeed();
@@ -622,6 +628,33 @@ public final class AgentTests {
 
         helper.assertTrue(registry.scheduler().isCancelled(anim),
                 "removing a mining bot must cancel its animation, not just forget the id");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 600)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bot_breaks_a_wall_between_it_and_its_target")
+    static void a_bot_breaks_a_wall_between_it_and_its_target(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        spawn(helper, registry, new BlockPos(3, 1, 7), "Hunter");
+        spawn(helper, registry, new BlockPos(11, 1, 7), "Quarry");
+
+        // A wall exactly bot-height, so neither side can jump it. Nothing before check 15 looks
+        // ahead of a bot -- checkAt reads the block the bot is standing in -- so until checkSide
+        // was wired this pair simply bounced off the wall until the test timed out.
+        for (int z = 5; z <= 9; z++) {
+            helper.setBlock(new BlockPos(7, 1, z), Blocks.STONE);
+            helper.setBlock(new BlockPos(7, 2, z), Blocks.STONE);
+        }
+
+        settle(registry, 5);
+        run(registry, 250);
+
+        // Head height on the line between them: whichever bot gets there first, this is the
+        // block the scan picks.
+        helper.assertBlockPresent(Blocks.AIR, new BlockPos(7, 2, 7));
 
         registry.reset();
         helper.succeed();

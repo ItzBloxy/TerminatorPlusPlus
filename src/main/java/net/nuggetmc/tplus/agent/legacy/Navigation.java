@@ -31,12 +31,17 @@ public final class Navigation {
     private final Agent agent;
     private final Mining mining;
     private final BlockScan blockScan;
+    private final SurroundingScan surroundingScan;
+    private final BotBehaviors behaviors;
 
-    public Navigation(AgentState state, Agent agent, Mining mining, BlockScan blockScan) {
+    public Navigation(AgentState state, Agent agent, Mining mining, BlockScan blockScan,
+                      SurroundingScan surroundingScan, BotBehaviors behaviors) {
         this.state = state;
         this.agent = agent;
         this.mining = mining;
         this.blockScan = blockScan;
+        this.surroundingScan = surroundingScan;
+        this.behaviors = behaviors;
     }
 
     /**
@@ -362,6 +367,53 @@ public final class Navigation {
 
         vector.multiply(0.1).setY(upward);
         bot.addVelocity(vector);
+    }
+
+    /**
+     * Decides whether the bot should move, stay put, or move despite being blocked.
+     *
+     * <p>Ported from {@code checkSide}. The three return values are upstream's, and
+     * {@code tickBot}'s switch reads them directly:
+     *
+     * <ul>
+     * <li><b>1</b> — nothing in the way. Reset the hand and move.
+     * <li><b>0</b> — something to the side, above or below. Stay put; the scan has already
+     *     started breaking it.
+     * <li><b>2</b> — something in the way that is neither. Move anyway.
+     * </ul>
+     *
+     * <p>The early return is the important part: a target within 2.9 blocks with a clear line to
+     * the block above it needs no scan at all, so a bot in melee range never starts mining.
+     *
+     * <p>{@code isSide()} is true for everything except ABOVE, BELOW, AT and AT_D, so the last
+     * condition reduces to "anything but AT and AT_D". Upstream wrote it the long way and it
+     * stays long: the two spellings stop meaning the same thing the moment a constant is added
+     * to {@link ScanOffset}.
+     */
+    public byte checkSide(Bot bot, LivingEntity target) {
+        ServerLevel level = (ServerLevel) bot.level();
+
+        Vec3 a = bot.getEyePosition();
+        Vec3 b = target.position().add(0, 1, 0);
+
+        if (bot.position().distanceTo(target.position()) < 2.9
+                && LegacyUtils.checkFreeSpace(level, a, b)) {
+            behaviors.resetHand(bot, target);
+            return 1;
+        }
+
+        ScanOffset offset = surroundingScan.checkNearby(bot, target);
+
+        if (offset == null) {
+            behaviors.resetHand(bot, target);
+            return 1;
+        }
+
+        if (offset.isSide() || offset == ScanOffset.BELOW || offset == ScanOffset.ABOVE) {
+            return 0;
+        }
+
+        return 2;
     }
 
     /**
