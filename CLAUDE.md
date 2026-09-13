@@ -49,8 +49,8 @@ git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/
 ## Commands
 
 ```bash
-./gradlew build              # compile + 98 unit tests
-./gradlew runGameTestServer  # 143 GameTests, headless, ~10s
+./gradlew build              # compile + 101 unit tests
+./gradlew runGameTestServer  # 146 GameTests, headless, ~10s
 ./gradlew runServer          # dev server, RCON on 25575 (password in run/server.properties)
 ./gradlew runClient          # dev client — connect to localhost
 ./gradlew jar                # the production jar, build/libs/tplus-*.jar
@@ -132,6 +132,11 @@ Renames and traps this port walked into:
 - `Direction.step()` is `getUnitVec3()`. `Blocks.CHAIN` is `Blocks.IRON_CHAIN`.
 - `Blocks.LIGHTNING_ROD` is a `WeatheringCopperCollection` — use `instanceof LightningRodBlock`.
 - Dyed families are `ColorCollection<Block>` with `.pick(DyeColor)`.
+- **Shears take their speed from a `Tool` data component, not a `ToolMaterial` and not a
+  `mineable/*` tag.** `ShearsItem.createToolProperties` builds it: 15.0 on `#minecraft:leaves` and
+  cobweb, 5.0 on `#minecraft:wool`, 2.0 on glow lichen and vine, 1.0 on everything else. The three
+  tags are `shears_extreme/major/minor_breaking_speed`. Nothing here is reachable from
+  `BlockTags.MINEABLE_WITH_*`, so a tool-coverage question has to read both systems.
 - `ItemInput.createItemStack(int)` takes one argument.
 - **Constructing an `ItemStack` in a static initialiser throws "Components not bound yet"** and
   breaks mod loading outright. Hold `Item` constants and build stacks at the call site.

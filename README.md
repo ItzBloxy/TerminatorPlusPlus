@@ -79,7 +79,7 @@ Needs **JDK 25**. The Gradle wrapper fetches everything else.
 ./gradlew jar
 ```
 
-`build` compiles and runs the 98 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
+`build` compiles and runs the 101 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
 
 <details>
 <summary><b>The other run tasks</b></summary>
@@ -161,6 +161,11 @@ The two lists differ because vanilla does — there is no chainmail pickaxe and 
 
 Omitting the tools argument gives **iron**, which is what bots have always had. Typing `none` gives
 **wood**, the floor: there is no bare-handed tier, because break speed now comes from the tool.
+
+Every tier also carries **shears**, which are not a tier of their own — vanilla has one pair. They
+are what a bot reaches for on leaves, wool and cobweb, the blocks where no pickaxe, axe or shovel
+beats bare hands. A leaf block goes from 120 ticks to 8, which is the difference between a bot
+crossing a forest and a bot stuck in one.
 
 ### Choosing a target
 
@@ -269,6 +274,8 @@ Beyond the port itself, things the Paper plugin did not have:
 - **Equipment at spawn.** Armour, tools and a weapon are arguments to `create`, so arming a squad is
   one command instead of three — and two squads can differ, which they could not before.
 - **Tool tiers, per bot.** Upstream had one hardcoded iron set for everyone.
+- **Shears.** Untiered and always present, so a bot cuts through leaves at 8 ticks a block instead
+  of 120. Wool and cobweb come along with them.
 - **Break speed follows the tool.** Upstream advanced one crack stage every two ticks, so every
   block took twenty ticks whatever the bot held. It is now the tool's destroy speed:
 
@@ -353,8 +360,8 @@ Each catches a class of defect the others cannot.
 | Tier | Catches | Blind to |
 |---|---|---|
 | Signature checks against the patched sources jar | Compile errors, 26.2 renames | Everything else |
-| **98 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
-| **143 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
+| **101 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
+| **146 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
 | `runServer` driven over RCON | Server-runtime crashes, command trees | Anything visual |
 | A real client | Rendering, skins, projectile collision, packet ordering | — |
 | Diffing against `paper-original` | Silent behaviour drift | — |

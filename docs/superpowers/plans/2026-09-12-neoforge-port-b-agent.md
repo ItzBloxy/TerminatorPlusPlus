@@ -9978,6 +9978,13 @@ the commit message. The sanctioned ones, for reference:
     way to name a specific entity. It deliberately does not reuse `CUSTOM_MOB_LIST`: that list
     only matches under `customListMode == CUSTOM`, and three other goals read it.
 31. `/tplus playertarget` now sets the goal to PLAYER instead of telling the operator to.
+32. Every bot with tools carries **shears** on top of its tier's three, and they are the only item
+    a bot holds that is not chosen by tier — vanilla has one pair, so there is nothing to tier.
+    `EquipmentTier.miningTools()` is `tools()` plus shears and is what `Mining.optimalTool`
+    weighs; `tools()` is untouched and is still upstream's `LegacyItems` set per tier. Shears
+    change the tool choice on 28 blocks — leaves, wool and cobweb — and on nothing else, because
+    they score 1.0 everywhere else and the comparison is strictly greater. Designed in
+    `docs/superpowers/specs/2026-09-13-shears-and-tool-coverage-design.md`.
 
 And two things found in Plan D that are **not** deviations:
 

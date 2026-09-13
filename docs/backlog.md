@@ -99,3 +99,27 @@ knows the clutch exists.
 `BlockScan.placeFinal` calls `setBlockAndUpdate` with no entity-occupancy check, which is upstream's
 behaviour. Several bots towering in one column will seal each other in. A check against entities in
 the target block would fix it and would be a deliberate divergence worth registering.
+
+### Break speed ignores hardness
+
+`Mining.blockBreakEffect` reads the held tool's destroy speed and never
+`BlockState.getDestroySpeed()`, so every block costs the same 120 progress — obsidian costs what
+dirt costs, and glass costs what obsidian costs. Upstream's behaviour, sanctioned as deviation 26.
+
+The shears audit put numbers on it for the first time. 221 blocks are mined at 1.0 because no tool
+covers them. Shears fixed 28 of those and a hoe would fix 18 more, which leaves **175 that no
+vanilla tool can reach**: glass and panes ×35, candles and candle cakes ×34, beds ×16, carpets ×16,
+heads and skulls ×14, and 60 others.
+
+Reading hardness is the only thing that moves them, and it is a redesign rather than a tuning
+change. It would not simply make 175 blocks faster: glass at hardness 0.3 becomes near-instant,
+while reinforced deepslate at 55.0 and trial spawners and vaults at 50.0 become far slower than the
+flat 120 ticks they cost now. And it changes the time of **every** block in the game, including the
+stone that `Mining.STAGE_COST` is defined to keep at exactly twenty ticks for iron, and that
+`iron_still_breaks_a_block_in_twenty_ticks` pins by name. That anchor is what makes the current
+speed model a documented extension of upstream rather than a drift away from it.
+
+A hoe is the other half of the audit and is deliberately not built: 18 blocks, all of them player
+builds or one biome, and shears already beat a netherite hoe on leaves 15.0 to 9.0.
+
+The full audit is in `docs/superpowers/specs/2026-09-13-shears-and-tool-coverage-design.md`.
