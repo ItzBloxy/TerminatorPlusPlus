@@ -11,6 +11,8 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.ChatFormatting;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.network.chat.Component;
@@ -18,6 +20,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
@@ -29,8 +35,12 @@ import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
+import net.nuggetmc.tplus.motion.BotMath;
+import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.util.MojangSkins;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
 
@@ -48,6 +58,34 @@ import java.util.function.Consumer;
 public final class BotCommands {
 
     private static final int MAX_BOTS_PER_COMMAND = 100;
+
+    /**
+     * The seven armor tiers, ported from {@code BotCommand.armorTierSetup}.
+     *
+     * <p>Ordered boots, leggings, chestplate, helmet — upstream's order, matching Bukkit's
+     * {@code setArmorContents}. The {@code none} tier is four empty slots, which is how armor is
+     * taken off again.
+     *
+     * <p>{@code Item} constants rather than stacks: a stack built in a static initialiser throws
+     * "Components not bound yet", the same trap {@code Mining.TOOLS} documents.
+     */
+    private static final Map<String, Item[]> ARMOR_TIERS = Map.of(
+            "none", new Item[]{null, null, null, null},
+            "leather", new Item[]{Items.LEATHER_BOOTS, Items.LEATHER_LEGGINGS,
+                    Items.LEATHER_CHESTPLATE, Items.LEATHER_HELMET},
+            "chain", new Item[]{Items.CHAINMAIL_BOOTS, Items.CHAINMAIL_LEGGINGS,
+                    Items.CHAINMAIL_CHESTPLATE, Items.CHAINMAIL_HELMET},
+            "gold", new Item[]{Items.GOLDEN_BOOTS, Items.GOLDEN_LEGGINGS,
+                    Items.GOLDEN_CHESTPLATE, Items.GOLDEN_HELMET},
+            "iron", new Item[]{Items.IRON_BOOTS, Items.IRON_LEGGINGS,
+                    Items.IRON_CHESTPLATE, Items.IRON_HELMET},
+            "diamond", new Item[]{Items.DIAMOND_BOOTS, Items.DIAMOND_LEGGINGS,
+                    Items.DIAMOND_CHESTPLATE, Items.DIAMOND_HELMET},
+            "netherite", new Item[]{Items.NETHERITE_BOOTS, Items.NETHERITE_LEGGINGS,
+                    Items.NETHERITE_CHESTPLATE, Items.NETHERITE_HELMET});
+
+    private static final EquipmentSlot[] ARMOR_SLOTS = {
+            EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD};
 
     private BotCommands() {
     }
@@ -141,6 +179,51 @@ public final class BotCommands {
                                                                 DoubleArgumentType.getDouble(ctx, "weightX"),
                                                                 DoubleArgumentType.getDouble(ctx, "weightY"),
                                                                 DoubleArgumentType.getDouble(ctx, "weightZ")))))))));
+
+        // Two settings that had state and no way to reach it: task 8 added mobTarget and the
+        // listener that reads it, task 4 added setTargetPlayer and task 10's PLAYER goal reads
+        // it, and neither had a command until now.
+        root.then(Commands.literal("mobtarget")
+                .executes(ctx -> {
+                    boolean on = TerminatorPlus.registry().isMobTarget();
+                    ctx.getSource().sendSuccess(() -> Component.literal(
+                            "Mob targeting is " + (on ? "enabled" : "disabled")), false);
+                    return 1;
+                })
+                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                        .executes(ctx -> {
+                            boolean on = BoolArgumentType.getBool(ctx, "enabled");
+                            TerminatorPlus.registry().setMobTarget(on);
+                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                    "Mob targeting is now " + (on ? "enabled" : "disabled")), true);
+                            return 1;
+                        })));
+
+        root.then(Commands.literal("playertarget")
+                .then(Commands.argument("player", EntityArgument.player())
+                        .executes(BotCommands::setPlayerTarget)));
+
+        root.then(Commands.literal("give")
+                .then(Commands.argument("item", ItemArgument.item(event.getBuildContext()))
+                        .executes(BotCommands::give)));
+
+        root.then(Commands.literal("armor")
+                .then(Commands.argument("tier", StringArgumentType.word())
+                        .suggests((ctx, builder) -> {
+                            ARMOR_TIERS.keySet().forEach(builder::suggest);
+                            return builder.buildFuture();
+                        })
+                        .executes(BotCommands::armor)));
+
+        root.then(Commands.literal("info")
+                .then(Commands.argument("name", StringArgumentType.string())
+                        .suggests((ctx, builder) -> {
+                            for (Bot bot : TerminatorPlus.registry().bots()) {
+                                builder.suggest(bot.getBotName());
+                            }
+                            return builder.buildFuture();
+                        })
+                        .executes(BotCommands::info)));
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
         root.then(Commands.literal("list").executes(BotCommands::list));
@@ -277,6 +360,122 @@ public final class BotCommands {
         bot.removeBot();
         ctx.getSource().sendSuccess(() -> Component.literal("Removed bot '" + name + "'"), true);
 
+        return 1;
+    }
+
+    /**
+     * Points every live bot at one player.
+     *
+     * <p>Ported from {@code settings playertarget}. Upstream's message said it plainly and it is
+     * worth repeating to the operator: the PLAYER goal has to be selected separately, or this
+     * changes nothing.
+     */
+    private static int setPlayerTarget(CommandContext<CommandSourceStack> ctx)
+            throws CommandSyntaxException {
+        ServerPlayer player = EntityArgument.getPlayer(ctx, "player");
+
+        for (Bot bot : TerminatorPlus.registry().bots()) {
+            bot.setTargetPlayer(player.getUUID());
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "All bots now target " + player.getGameProfile().name()
+                        + ". Set the goal to 'player' for this to take effect."), true);
+        return 1;
+    }
+
+    /**
+     * Sets every bot's default item.
+     *
+     * <p>Ported from {@code give}. The default item is what {@code setItem(null)} restores and
+     * what {@code ItemUtils} scores for damage, so this is how a bot is armed.
+     */
+    private static int give(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(1);
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+
+        for (Bot bot : bots) {
+            bot.setDefaultItem(stack.copy());
+
+            // Not upstream's: it set the field and left a bot holding whatever it had until the
+            // next resetHand. Putting the item in hand now is what an operator typing the
+            // command expects, and resetHand would do it within a few ticks anyway.
+            bot.setItem(null);
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Set the default item to " + stack.getHoverName().getString()
+                        + " for " + bots.size() + " bot(s)"), true);
+        return 1;
+    }
+
+    /**
+     * Equips every bot with an armor tier.
+     *
+     * <p>Ported from {@code armor}. Upstream wrote the Bukkit inventory <i>and</i> sent the
+     * equipment packets, with the comment "packet sending to ensure";
+     * {@code Bot.setItem(stack, slot)} already does both, so one call per slot is enough.
+     */
+    private static int armor(CommandContext<CommandSourceStack> ctx) {
+        String tier = StringArgumentType.getString(ctx, "tier").toLowerCase();
+        Item[] pieces = ARMOR_TIERS.get(tier);
+
+        if (pieces == null) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "'" + tier + "' is not a valid tier. Available: "
+                            + String.join(", ", ARMOR_TIERS.keySet())));
+            return 0;
+        }
+
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+
+        for (Bot bot : bots) {
+            for (int i = 0; i < ARMOR_SLOTS.length; i++) {
+                ItemStack stack = pieces[i] == null ? ItemStack.EMPTY : new ItemStack(pieces[i]);
+                bot.setItem(stack, ARMOR_SLOTS[i]);
+            }
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Set armor tier '" + tier + "' for " + bots.size() + " bot(s)"), true);
+        return 1;
+    }
+
+    /**
+     * Reports one bot's state.
+     *
+     * <p>Ported from {@code info}. Upstream ran this asynchronously and wrapped it in a
+     * catch-all because it also did a name lookup that could block; ours reads live entity state
+     * and must therefore run on the server thread. Upstream's own comment lists fields it never
+     * implemented — creation time, inventory, current target, skin — and those stay
+     * unimplemented here.
+     */
+    private static int info(CommandContext<CommandSourceStack> ctx) {
+        String name = StringArgumentType.getString(ctx, "name");
+        Bot bot = TerminatorPlus.registry().byName(name);
+
+        if (bot == null) {
+            ctx.getSource().sendFailure(Component.literal("No bot named '" + name + "'"));
+            return 0;
+        }
+
+        Vec3 pos = bot.position();
+        MotionVec vel = bot.getVelocity();
+
+        ctx.getSource().sendSuccess(() -> Component.literal(bot.getBotName())
+                .withStyle(ChatFormatting.GREEN)
+                .append(Component.literal(
+                        "\n  Level: " + bot.level().dimension().identifier()
+                        + "\n  Position: " + BotMath.round2Dec(pos.x) + ", "
+                                + BotMath.round2Dec(pos.y) + ", " + BotMath.round2Dec(pos.z)
+                        + "\n  Velocity: " + BotMath.round2Dec(vel.getX()) + ", "
+                                + BotMath.round2Dec(vel.getY()) + ", " + BotMath.round2Dec(vel.getZ())
+                        + "\n  Health: " + BotMath.round1Dec(bot.getBotHealth())
+                                + " / " + BotMath.round1Dec(bot.getBotMaxHealth())
+                        + "\n  Alive ticks: " + bot.getAliveTicks()
+                        + "\n  Kills: " + bot.getKills()
+                        + "\n  In player list: " + bot.isInPlayerList())
+                        .withStyle(ChatFormatting.RESET)), false);
         return 1;
     }
 

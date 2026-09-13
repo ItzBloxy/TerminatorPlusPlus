@@ -553,6 +553,19 @@ public class Bot extends ServerPlayer {
         this.targetPlayer = target;
     }
 
+    /**
+     * Pass-throughs so callers outside this package read a bot's health without touching the
+     * {@code LivingEntity} surface. Deferred from task 4 because nothing read them until
+     * {@code /tplus info}.
+     */
+    public float getBotHealth() {
+        return getHealth();
+    }
+
+    public float getBotMaxHealth() {
+        return getMaxHealth();
+    }
+
     public int getKills() {
         return kills;
     }

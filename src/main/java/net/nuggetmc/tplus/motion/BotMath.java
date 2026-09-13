@@ -84,10 +84,6 @@ public final class BotMath {
         if (!Double.isFinite(vec.getZ())) vec.setZ(0);
     }
 
-    public static <E> E getRandomSetElement(Set<E> set) {
-        return set.isEmpty() ? null : set.stream().skip(RANDOM.nextInt(set.size())).findFirst().orElse(null);
-    }
-
     /**
      * Block-coordinate X, matching Bukkit's {@code Location.getBlockX}.
      *
