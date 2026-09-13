@@ -1,6 +1,10 @@
 name: "Compile"
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  # So the workflow can be started by hand from the Actions tab, not only by a push.
+  workflow_dispatch:
 
 jobs:
   gradle:
