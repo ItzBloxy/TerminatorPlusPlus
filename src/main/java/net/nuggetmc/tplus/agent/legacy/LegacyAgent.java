@@ -47,6 +47,7 @@ public final class LegacyAgent extends Agent {
     private final Navigation navigation;
     private final BotBehaviors behaviors;
     private final Mining mining;
+    private final BlockScan blockScan;
 
     /** Whether bots aim at a ring around the target rather than the target itself. */
     public boolean offsets = true;
@@ -57,7 +58,8 @@ public final class LegacyAgent extends Agent {
         this.state = registry.state();
         this.targeting = new Targeting(registry);
         this.mining = new Mining(state, this);
-        this.navigation = new Navigation(state, this, mining);
+        this.blockScan = new BlockScan(state, this);
+        this.navigation = new Navigation(state, this, mining, blockScan);
         this.behaviors = new BotBehaviors(state, mining);
     }
 
@@ -130,9 +132,10 @@ public final class LegacyAgent extends Agent {
                 withinTargetXZ = true;
             }
 
-            // Declared here to match upstream's order, and deliberately not read until task 19
-            // adds checkDown. It is here so the three later insertions do not have to reorder
-            // this block.
+            // Upstream wrote this expression three times: once as a variable for checkDown,
+            // once inline as checkUp's guard, and once again for checkSide in task 21. Kept as
+            // three readings rather than one, because collapsing them would hide that the same
+            // condition is being asked for three different reasons.
             boolean bothXZ = withinTargetXZ || sameXZ;
 
             // Upstream captures the head block before the XZ comparison and uses it for
@@ -156,10 +159,19 @@ public final class LegacyAgent extends Agent {
                 return;
             }
 
-            // Tasks 19 and 21 insert their checks here, in this order:
-            //   checkDown, checkUp (only when withinTargetXZ || sameXZ),
-            //   checkSide (only when bothXZ).
-            // Each returns true for "handled", and tickBot returns immediately on true.
+            // checkDown gets the target's TRUE position; checkUp gets the offset aim point.
+            // The asymmetry is upstream's and is deliberate: digging aims at the target,
+            // towering aims at the ring around it.
+            if (navigation.checkDown(bot, livingTarget.position(), bothXZ)) {
+                return;
+            }
+
+            if ((withinTargetXZ || sameXZ)
+                    && navigation.checkUp(bot, livingTarget, target, withinTargetXZ, sameXZ)) {
+                return;
+            }
+
+            // Task 21 inserts checkSide here, guarded on bothXZ.
 
             switch (sideResult) {
                 case 1:

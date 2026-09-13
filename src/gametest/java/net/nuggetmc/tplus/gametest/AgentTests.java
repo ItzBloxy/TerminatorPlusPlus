@@ -10,6 +10,7 @@ import net.neoforged.testframework.annotation.TestHolder;
 import net.neoforged.testframework.gametest.EmptyTemplate;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
 import net.neoforged.testframework.gametest.GameTest;
+import net.nuggetmc.tplus.agent.legacy.BlockScan;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.Mining;
 import net.nuggetmc.tplus.agent.legacy.TargetGoal;
@@ -588,6 +589,115 @@ public final class AgentTests {
         // Faithfully wasteful — pinned here so the waste is not mistaken for a bug later.
         helper.assertTrue(!registry.state().crackList.isEmpty(),
                 "the progress task must still be running on the bedrock");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    // ---- vertical navigation ------------------------------------------------
+
+    @GameTest(timeoutTicks = 600)
+    @EmptyTemplate(value = "9x30x9", floor = true)
+    @TestHolder("a_bot_towers_toward_a_target_above_it")
+    static void a_bot_towers_toward_a_target_above_it(ExtendedGameTestHelper helper) {
+        // A real player rather than a second bot: the target has to stay exactly where it is
+        // put, and a bot would hunt back. makeMockServerPlayerInLevel is CREATIVE, so the goal
+        // has to be the one that ignores gamemode.
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_PLAYER);
+
+        var target = helper.makeMockServerPlayerInLevel();
+        target.snapTo(helper.absoluteVec(new Vec3(4.5, 12, 4.5)), 0f, 0f);
+
+        Bot bot = spawn(helper, registry, new BlockPos(4, 1, 4), "Climber");
+
+        double startY = bot.getY();
+        run(registry, 300);
+
+        // checkUp needs the same column and three clear blocks above the bot's feet. It then
+        // places cobblestone where the feet were and jumps off it.
+        helper.assertTrue(bot.getY() > startY + 1.0,
+                "the bot must climb; y went " + startY + " -> " + bot.getY());
+
+        // And it must have climbed by building, not by bouncing: the first tower step places
+        // cobblestone where the bot's feet were.
+        helper.assertBlockPresent(Blocks.COBBLESTONE, new BlockPos(4, 1, 4));
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 600)
+    @EmptyTemplate(value = "9x30x9", floor = true)
+    @TestHolder("a_bot_mines_down_toward_a_target_far_below")
+    static void a_bot_mines_down_toward_a_target_far_below(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_PLAYER);
+
+        // A solid column under the bot, so neither ray reaches the target and checkDown is the
+        // only way down.
+        for (int y = 2; y <= 14; y++) {
+            for (int x = 3; x <= 5; x++) {
+                for (int z = 3; z <= 5; z++) {
+                    helper.setBlock(new BlockPos(x, y, z), Blocks.STONE);
+                }
+            }
+        }
+
+        var target = helper.makeMockServerPlayerInLevel();
+        target.snapTo(helper.absoluteVec(new Vec3(4.5, 1, 4.5)), 0f, 0f);
+
+        Bot bot = spawn(helper, registry, new BlockPos(4, 15, 4), "Digger");
+
+        double startY = bot.getY();
+        run(registry, 200);
+
+        // Thirteen blocks down and out of sight: same column and more than one block up is the
+        // first of checkDown's two ways in.
+        helper.assertTrue(bot.getY() < startY - 1.0,
+                "the bot must dig down; y went " + startY + " -> " + bot.getY());
+
+        // Down through the column, not around it.
+        helper.assertBlockPresent(Blocks.AIR, new BlockPos(4, 14, 4));
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x30x9", floor = true)
+    @TestHolder("placing_a_block_over_nothing_also_fills_the_block_below")
+    static void placing_a_block_over_nothing_also_fills_the_block_below(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(4, 1, 4), "Mason");
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+
+        // Mid-air, with nothing within a block of it in any direction. The first branch shores
+        // up the block below and then -- upstream's missing return -- falls through every
+        // neighbour test to place the target block as well, both in the same tick.
+        BlockPos at = new BlockPos(4, 10, 4);
+        blockScan.placeBlock(bot, helper.absolutePos(at));
+
+        helper.assertBlockPresent(Blocks.COBBLESTONE, at);
+        helper.assertBlockPresent(Blocks.COBBLESTONE, at.below());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "9x30x9", floor = true)
+    @TestHolder("placing_a_block_on_solid_ground_leaves_the_ground_alone")
+    static void placing_a_block_on_solid_ground_leaves_the_ground_alone(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(4, 1, 4), "Mason");
+        BlockScan blockScan = new BlockScan(registry.state(), registry.agent());
+
+        BlockPos at = new BlockPos(4, 10, 4);
+        helper.setBlock(at.below(), Blocks.STONE);
+
+        blockScan.placeBlock(bot, helper.absolutePos(at));
+
+        helper.assertBlockPresent(Blocks.COBBLESTONE, at);
+        helper.assertBlockPresent(Blocks.STONE, at.below());
 
         registry.reset();
         helper.succeed();
