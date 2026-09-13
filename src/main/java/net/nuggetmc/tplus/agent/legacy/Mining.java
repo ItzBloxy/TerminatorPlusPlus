@@ -211,6 +211,12 @@ public final class Mining {
                     level.playSound(null, pos, sound, SoundSource.BLOCKS, 1f, 1f);
                 }
 
+                // Neither drops nor durability follow the held tool, which is worth saying now
+                // that the tool can be shears. destroyBlock hands ItemStack.EMPTY to
+                // Block.dropResources rather than the breaker's item, so sheared leaves still
+                // drop saplings rather than leaf blocks and a bot does not litter a forest with
+                // item entities. And nothing in this mod calls mineBlock, the only thing that
+                // spends durability, so a bot never snaps its shears after 238 blocks.
                 level.destroyBlock(pos, true, bot);
 
                 if (wrapper.get() == ScanOffset.ABOVE) {
@@ -440,12 +446,19 @@ public final class Mining {
      * <p>The tier is a parameter rather than the static {@code LegacyItems} list upstream had, so
      * two bots can carry different tools — and since {@link #blockBreakEffect} accrues the held
      * stack's destroy speed, this is also what decides how fast the block comes down.
+     *
+     * <p>The candidates are {@link EquipmentTier#miningTools()} and not {@code tools()}, so
+     * shears are weighed alongside the tier's three. Upstream had no fourth tool and no untiered
+     * one. Shears cannot displace a tier tool: they score 1.0 on all but leaves, wool, cobweb,
+     * glow lichen and vine, and the comparison below is strictly greater — so they win only
+     * where every tier tool also scores 1.0, which is leaves, wool and cobweb. Glow lichen and
+     * vine are {@code mineable/axe}, so the axe keeps those on speed or on being iterated first.
      */
     static ItemStack optimalTool(EquipmentTier tier, BlockState target) {
         ItemStack optimal = ItemStack.EMPTY;
         float optimalSpeed = 1;
 
-        for (Item item : tier.tools()) {
+        for (Item item : tier.miningTools()) {
             ItemStack tool = new ItemStack(item);
             float speed = tool.getDestroySpeed(target);
 

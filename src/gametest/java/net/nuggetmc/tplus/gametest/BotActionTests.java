@@ -7,6 +7,8 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
 import net.neoforged.testframework.annotation.TestHolder;
@@ -52,10 +54,29 @@ public final class BotActionTests {
     /** A bot with a tier, and a stone block in its head space, which is where ScanOffset.AT points. */
     private static Bot miner(ExtendedGameTestHelper helper, BotRegistry registry,
                              int x, int z, EquipmentTier tier) {
+        return miner(helper, registry, x, z, tier, Blocks.STONE.defaultBlockState());
+    }
+
+    /** As above, with the block in the head space spelled out. */
+    private static Bot miner(ExtendedGameTestHelper helper, BotRegistry registry,
+                             int x, int z, EquipmentTier tier, BlockState target) {
         Bot bot = spawn(helper, registry, new BlockPos(x, 1, z));
         bot.setToolTier(tier);
-        helper.setBlock(new BlockPos(x, 2, z), Blocks.STONE);
+        helper.setBlock(new BlockPos(x, 2, z), target);
         return bot;
+    }
+
+    /**
+     * Oak leaves that will not decay.
+     *
+     * <p>A method rather than a static field, so nothing about a BlockState is resolved at class
+     * load. The tick-counting tests run their whole loop inside a single server tick, so decay
+     * cannot fire today — but a later test that ticks the level for real would watch leaves
+     * vanish on their own and read it as a break. Persistent leaves make that impossible rather
+     * than merely unlikely.
+     */
+    private static BlockState persistentLeaves() {
+        return Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
     }
 
     private static boolean isAir(ExtendedGameTestHelper helper, int x, int y, int z) {
@@ -664,6 +685,94 @@ public final class BotActionTests {
         bot.attemptBlockPlace(helper.absolutePos(new BlockPos(3, 1, 1)), Blocks.COBBLESTONE, false);
 
         helper.assertTrue(bot.getMainHandItem().is(Items.COBBLESTONE), "held item after placing");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("a_bot_shears_leaves")
+    static void a_bot_shears_leaves(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = miner(helper, registry, 3, 3, EquipmentTier.IRON, persistentLeaves());
+
+        // A direct preBreak call, not 200 ticks of hunting: move() adds Math.random() to every
+        // jump, so a ticked test would measure the walk rather than the tool choice.
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        // Before shears, nothing in the tier beat 1.0 on leaves, so optimalTool returned an
+        // empty stack and the bot tore at them bare-handed for 120 ticks a block.
+        helper.assertTrue(bot.getMainHandItem().is(Items.SHEARS),
+                "a bot must shear leaves, got " + bot.getMainHandItem());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("shears_break_leaves_in_eight_ticks")
+    static void shears_break_leaves_in_eight_ticks(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = miner(helper, registry, 3, 3, EquipmentTier.IRON, persistentLeaves());
+
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        // Only the scheduler is ticked, exactly as iron_still_breaks_a_block_in_twenty_ticks
+        // does: ticking the registry would run the agent, the agent moves bots, and the break
+        // task cancels itself the moment the bot stops aiming at the block.
+        int ticks = 0;
+
+        for (int tick = 1; tick <= 100 && ticks == 0; tick++) {
+            registry.scheduler().tick();
+
+            if (isAir(helper, 3, 2, 3)) {
+                ticks = tick;
+            }
+        }
+
+        // Derived, not measured and pasted back. Shears score 15.0 on #minecraft:leaves, so one
+        // run adds max(1, round(15.0 * BREAK_PERIOD)) = 30, and BREAK_COST 120 needs four of
+        // them, BREAK_PERIOD 2 ticks apart. Bare-handed the same block took 120 ticks.
+        helper.assertValueEqual(ticks, 8, "shears must break leaves in exactly eight ticks");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "15x5x7", floor = true)
+    @TestHolder("shears_never_displace_a_pickaxe")
+    static void shears_never_displace_a_pickaxe(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+        Mining mining = new Mining(registry.state(), registry.agent());
+
+        // The one real risk in adding a fourth candidate. Shears score 1.0 on stone and
+        // optimalTool replaces only on strictly greater, so every tier must still reach for its
+        // own pickaxe. Wood is the narrowest margin in the game: its pickaxe scores 2.0.
+        Bot wood = miner(helper, registry, 2, 3, EquipmentTier.WOOD);
+        Bot iron = miner(helper, registry, 6, 3, EquipmentTier.IRON);
+        Bot netherite = miner(helper, registry, 10, 3, EquipmentTier.NETHERITE);
+
+        mining.preBreak(wood, helper.absolutePos(new BlockPos(2, 2, 3)), ScanOffset.AT);
+        mining.preBreak(iron, helper.absolutePos(new BlockPos(6, 2, 3)), ScanOffset.AT);
+        mining.preBreak(netherite, helper.absolutePos(new BlockPos(10, 2, 3)), ScanOffset.AT);
+
+        helper.assertTrue(wood.getMainHandItem().is(Items.WOODEN_PICKAXE),
+                "wood must still mine stone with its own pickaxe, got " + wood.getMainHandItem());
+        helper.assertTrue(iron.getMainHandItem().is(Items.IRON_PICKAXE),
+                "iron must still mine stone with its own pickaxe, got " + iron.getMainHandItem());
+        helper.assertTrue(netherite.getMainHandItem().is(Items.NETHERITE_PICKAXE),
+                "netherite must still mine stone with its own pickaxe, got "
+                        + netherite.getMainHandItem());
 
         registry.reset();
         helper.succeed();
