@@ -1,7 +1,7 @@
 modLoader="javafml"
 loaderVersion="[1,)"
 license="${mod_license}"
-issueTrackerURL="https://github.com/ItzBloxy/terminatorplusplus/issues"
+issueTrackerURL="https://github.com/ItzBloxy/TerminatorPlusPlus/issues"
 
 [[mods]]
 modId="${mod_id}"
