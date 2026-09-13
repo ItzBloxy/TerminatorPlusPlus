@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.LightningRodBlock;
 import net.minecraft.world.level.block.SkullBlock;
 import net.minecraft.world.level.block.WallSkullBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 import java.util.Set;
 
@@ -245,6 +246,41 @@ public final class BlockRules {
                 || state.is(BlockTags.BANNERS)
                 || state.is(BlockTags.WALL_CORALS)
                 || state.getBlock() instanceof LeverBlock;
+    }
+
+    /**
+     * Whether a bot must break this block to pass through the space it occupies.
+     *
+     * <p>Ported from {@code LegacyAgent.checkAt}, inverted: upstream returned true for "handled,
+     * I am now mining it", which is a decision for the caller. This returns whether the block is
+     * in the way. Note it is the negation of {@link #isBreak}, not of {@link #isAir}.
+     */
+    public static boolean blocksPath(BlockState state) {
+        return !isBreak(state);
+    }
+
+    /** Ported from {@code checkFenceAndGates}. */
+    public static boolean isFenceOrGate(BlockState state) {
+        return isFence(state) || isGate(state);
+    }
+
+    /**
+     * Ported from {@code checkObstacles} plus {@code isDoorObstacle}.
+     *
+     * <p>The door rule is upstream's and is asymmetric: <b>any</b> door is an obstacle, but a
+     * trapdoor only when it is open. A closed trapdoor is floor.
+     */
+    public static boolean isObstacleOrDoor(BlockState state) {
+        if (isObstacle(state)) {
+            return true;
+        }
+
+        if (state.is(BlockTags.DOORS)) {
+            return true;
+        }
+
+        return state.is(BlockTags.TRAPDOORS)
+                && state.getValueOrElse(BlockStateProperties.OPEN, false);
     }
 
     /**

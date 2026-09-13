@@ -51,6 +51,43 @@ public final class TickScheduler {
         cancelled.add(id);
     }
 
+    /**
+     * Schedules {@code action} to run every {@code periodTicks}, starting one period from now.
+     *
+     * <p>Replaces {@code BukkitRunnable.runTaskTimer(plugin, 0, period)}. Two differences, both
+     * deliberate: the first run is one period away rather than immediate, because nothing in
+     * this class runs inline; and the id stays stable across repeats, so a single
+     * {@link #cancel(int)} stops the task for good.
+     *
+     * <p>Expressed as a task that reschedules itself, which reuses the cancellation set and the
+     * per-task error isolation in {@link #tick()} rather than adding a second mechanism. A
+     * throwing run is logged there and the task is still re-armed — the swing animation in
+     * {@code Mining} must survive one bad tick.
+     *
+     * @return an id usable with {@link #cancel(int)}
+     */
+    public int runRepeating(long periodTicks, Runnable action) {
+        int id = nextId++;
+        schedule(id, Math.max(1, periodTicks), action);
+        return id;
+    }
+
+    private void schedule(int id, long period, Runnable action) {
+        long due = currentTick + period;
+
+        queue.computeIfAbsent(due, k -> new ArrayList<>()).add(new Task(id, () -> {
+            try {
+                action.run();
+            } finally {
+                // In a finally block so a throwing action does not end the repetition. The
+                // cancellation check in tick() is what stops it.
+                if (!cancelled.contains(id)) {
+                    schedule(id, period, action);
+                }
+            }
+        }));
+    }
+
     public void cancelAll() {
         queue.clear();
         cancelled.clear();
@@ -70,7 +107,11 @@ public final class TickScheduler {
         }
 
         for (Task task : due) {
-            if (cancelled.remove(task.id())) {
+            // contains, not remove. Consuming the flag is fine for a one-shot but would let a
+            // repeating task resume after one skipped run, because its id comes back every
+            // period. The set therefore grows over a long session; it is bounded in practice by
+            // cancelAll on every reset, and the ids are ints, so no reaper is worth building.
+            if (cancelled.contains(task.id())) {
                 continue;
             }
             try {

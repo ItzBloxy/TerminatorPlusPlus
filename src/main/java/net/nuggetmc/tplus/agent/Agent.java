@@ -95,8 +95,16 @@ public abstract class Agent {
         return id;
     }
 
-    // repeating(long, Runnable) lands in task 16, alongside TickScheduler.runRepeating — the
-    // swing animation is its first caller and there is nothing to schedule against until then.
+    /** Schedules a repeating {@code action} and remembers the id. */
+    public int repeating(long periodTicks, Runnable action) {
+        if (registry == null) {
+            return -1;
+        }
+
+        int id = registry.scheduler().runRepeating(periodTicks, action);
+        taskList.add(id);
+        return id;
+    }
 
     /** Cancels a task this agent scheduled and forgets its id. */
     public void cancel(int id) {

@@ -46,6 +46,7 @@ public final class LegacyAgent extends Agent {
     private final Targeting targeting;
     private final Navigation navigation;
     private final BotBehaviors behaviors;
+    private final Mining mining;
 
     /** Whether bots aim at a ring around the target rather than the target itself. */
     public boolean offsets = true;
@@ -55,6 +56,7 @@ public final class LegacyAgent extends Agent {
 
         this.state = registry.state();
         this.targeting = new Targeting(registry);
+        this.mining = new Mining(state, this);
         this.navigation = new Navigation(state, this);
         this.behaviors = new BotBehaviors(state, navigation);
     }
@@ -133,9 +135,30 @@ public final class LegacyAgent extends Agent {
             // this block.
             boolean bothXZ = withinTargetXZ || sameXZ;
 
-            // Tasks 16, 19 and 21 insert their checks here, in this order:
-            //   checkAt, checkFenceAndGates, checkObstacles, checkDown,
-            //   checkUp (only when withinTargetXZ || sameXZ), checkSide (only when bothXZ).
+            // Upstream captures the head block before the XZ comparison and uses it for
+            // checkAt; the other two read the block the bot is standing in. The order matters:
+            // a bot inside a fence with something solid above it mines upward first.
+            BlockPos botPos = BlockPos.containing(pos);
+            BlockPos headPos = botPos.above();
+
+            if (BlockRules.blocksPath(level.getBlockState(headPos))) {
+                mining.preBreak(bot, headPos, ScanOffset.AT);
+                return;
+            }
+
+            if (BlockRules.isFenceOrGate(level.getBlockState(botPos))) {
+                mining.preBreak(bot, botPos, ScanOffset.AT_D);
+                return;
+            }
+
+            if (BlockRules.isObstacleOrDoor(level.getBlockState(botPos))) {
+                mining.preBreak(bot, botPos, ScanOffset.AT_D);
+                return;
+            }
+
+            // Tasks 19 and 21 insert their checks here, in this order:
+            //   checkDown, checkUp (only when withinTargetXZ || sameXZ),
+            //   checkSide (only when bothXZ).
             // Each returns true for "handled", and tickBot returns immediately on true.
 
             switch (sideResult) {

@@ -348,6 +348,81 @@ public final class AgentTests {
         helper.succeed();
     }
 
+    // ---- mining -------------------------------------------------------------
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("mining_starts_exactly_one_swing_animation_per_bot")
+    static void mining_starts_exactly_one_swing_animation_per_bot(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        // Obsidian so the block never breaks and the test cannot end early.
+        helper.setBlock(new BlockPos(6, 2, 7), Blocks.OBSIDIAN);
+
+        settle(registry, 5);
+        run(registry, 60);
+
+        // preBreak runs every tick while the bot is blocked, and the containsKey guard is the
+        // only thing stopping it stacking one swing task per tick.
+        helper.assertTrue(registry.state().miningAnim.containsKey(bot),
+                "an animation must be running");
+        helper.assertValueEqual(registry.state().miningAnim.size(), 1,
+                "exactly one animation, not sixty");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_blocked_bot_equips_the_right_tool")
+    static void a_blocked_bot_equips_the_right_tool(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        // Stone at head height: checkAt fires, and a pickaxe is the fastest of the three tools
+        // upstream considers.
+        helper.setBlock(new BlockPos(6, 2, 7), Blocks.OBSIDIAN);
+
+        settle(registry, 5);
+        run(registry, 10);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.IRON_PICKAXE),
+                "a bot mining stone must hold the pickaxe, got " + bot.getMainHandItem());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bot_inside_a_fence_stops_to_break_it")
+    static void a_bot_inside_a_fence_stops_to_break_it(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        helper.setBlock(new BlockPos(6, 1, 7), Blocks.OAK_FENCE);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Fenced");
+        spawn(helper, registry, new BlockPos(12, 1, 7), "Quarry");
+
+        settle(registry, 5);
+        Vec3 start = bot.position();
+        run(registry, 30);
+
+        // checkFenceAndGates returns "handled", so tickBot stops before move(). Until task 17
+        // supplies the progress task the fence never actually breaks — the bot just commits to
+        // it, which is what this checks.
+        helper.assertTrue(registry.state().miningAnim.containsKey(bot),
+                "the bot must be mining the fence rather than jumping at it");
+        helper.assertTrue(bot.position().distanceTo(start) < 2.0,
+                "and must not have wandered off toward the target");
+
+        registry.reset();
+        helper.succeed();
+    }
+
     @GameTest(timeoutTicks = 600)
     @EmptyTemplate(value = "9x30x9", floor = true)
     @TestHolder("a_falling_bot_clutches_with_water")
