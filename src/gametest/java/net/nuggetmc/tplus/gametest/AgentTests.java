@@ -670,12 +670,17 @@ public final class AgentTests {
         Bot bot = spawn(helper, registry, new BlockPos(4, 1, 4), "Climber");
 
         double startY = bot.getY();
-        run(registry, 300);
 
-        // checkUp needs the same column and three clear blocks above the bot's feet. It then
-        // places cobblestone where the feet were and jumps off it.
-        helper.assertTrue(bot.getY() > startY + 1.0,
-                "the bot must climb; y went " + startY + " -> " + bot.getY());
+        // Two blocks, not one. A bot that places a single block and stands on it ends at exactly
+        // startY + 1, which a strict > compares against its own epsilon -- the first draft of
+        // this test asked for more than one block of climb and failed by five thousandths. Two
+        // is unambiguous, and proves the tower repeats rather than happening once.
+        run(registry, 150);
+        double atHalfway = bot.getY();
+        run(registry, 450);
+
+        helper.assertTrue(bot.getY() > startY + 2.0,
+                "the bot must climb; y went " + startY + " -> " + atHalfway + " -> " + bot.getY());
 
         // And it must have climbed by building, not by bouncing: the first tower step places
         // cobblestone where the bot's feet were.
