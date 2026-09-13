@@ -42,21 +42,20 @@ public final class MojangSkins {
 
     private static final String UUID_URL = "https://api.mojang.com/users/profiles/minecraft/";
     /**
-     * {@code unsigned=true}, where upstream asked for {@code unsigned=false}.
+     * {@code unsigned=false}, as upstream had it. Signed, and it has to be.
      *
-     * <p>Mojang signs a texture property against the <b>original account's</b> profile id, and
-     * a bot's profile has a fresh random id. A modern client verifies any signature it is given
-     * and drops the texture when it does not match, logging "Profile contained invalid signature
-     * for textures property" — which is exactly what play-testing found, on every bot, silently
-     * as far as the server was concerned.
+     * <p>This was briefly changed to {@code unsigned=true} on the theory that a client rejects a
+     * signature it cannot validate. It does not: {@code SkinManager} logs "Profile contained
+     * invalid signature for textures property" and then registers the textures anyway, and
+     * authlib's {@code unpackTextures} never branches on the signature state at all. Meanwhile
+     * an <b>unsigned</b> property renders nothing, with no message on either side.
      *
-     * <p>An unsigned property carries no signature to fail, and the client renders it. The cost
-     * is that these textures are not verifiable, which for a bot nobody is authenticating is no
-     * cost at all. The alternative — keeping the signature and reusing the real account's UUID —
-     * would make every bot spawned from one name share an identity.
+     * <p>So the signature being bound to the original account's profile id, which a bot's fresh
+     * id never matches, costs one warning per skin in the client log and nothing else. That is
+     * the trade, and it is upstream's.
      */
     private static final String SESSION_URL =
-            "https://sessionserver.mojang.com/session/minecraft/profile/%s?unsigned=true";
+            "https://sessionserver.mojang.com/session/minecraft/profile/%s?unsigned=false";
 
     private MojangSkins() {
     }

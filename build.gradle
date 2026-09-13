@@ -30,6 +30,12 @@ neoForge {
             programArgument '--nogui'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
+        // Added for the manual pass the plans keep deferring: towering, the crack overlay and
+        // the MLG are things a person has to watch. The mod is server-side, so this client
+        // exists only to connect to `runServer` on localhost.
+        client {
+            client()
+        }
         gameTestServer {
             type = 'gameTestServer'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id

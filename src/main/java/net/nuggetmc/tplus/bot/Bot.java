@@ -106,8 +106,35 @@ public class Bot extends ServerPlayer {
      */
     private BotRegistry registry;
 
+    /**
+     * Every bit of {@code PlayerModelPart} set: cape, jacket, both sleeves, both trouser legs
+     * and hat. Seven parts, so 0x7F.
+     */
+    private static final int ALL_SKIN_LAYERS = 0x7F;
+
     public Bot(MinecraftServer server, ServerLevel level, GameProfile profile) {
         super(server, level, profile, ClientInformation.createDefault());
+
+        // Every skin layer on. ClientInformation.createDefault() sets the model-customisation
+        // mask to 0, and that mask is what a real client sends from its skin-customisation
+        // options; a bot has no client to send one, so without this a bot wears only the base
+        // skin -- no hat, no jacket, no sleeves, no cape.
+        //
+        // Upstream did this as `entityData.set(new EntityDataAccessor<>(17, BYTE), (byte) 0x7F)`,
+        // hardcoding the data index. updateOptions reaches the same field by name, so it cannot
+        // silently target the wrong one when the index shifts, which it does most versions.
+        ClientInformation defaults = ClientInformation.createDefault();
+
+        updateOptions(new ClientInformation(
+                defaults.language(),
+                defaults.viewDistance(),
+                defaults.chatVisibility(),
+                defaults.chatColors(),
+                ALL_SKIN_LAYERS,
+                defaults.mainHand(),
+                defaults.textFilteringEnabled(),
+                defaults.allowsListing(),
+                defaults.particleStatus()));
 
         this.connection = new ServerGamePacketListenerImpl(
                 server,
