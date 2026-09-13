@@ -9929,6 +9929,16 @@ the commit message. The sanctioned ones, for reference:
     `TickScheduler.runRepeating` starts one period out where `runTaskTimer(plugin, 0, n)` starts
     on the next tick. Every break takes 21 ticks rather than 20 (Task 16).
 
+16. `BlockScan.clutch` picks its anchor from a fixed neighbour order and `tryPreMLG` sorts a
+    `LinkedHashSet`. Both of upstream's were `HashSet`s, so which of two equally good neighbours
+    or candidates won was unspecified — ours is the same choice every time (Task 23).
+
+Found by the Task 24 audit and **fixed rather than sanctioned**: four `faceLocation` calls aimed
+at a block's centre where upstream aimed at its lower corner, because a Bukkit block `Location`
+*is* the lower corner. `Mining.preBreak`'s AT case was half a block out in Y, and the footprint
+scan, the pre-MLG and the clutch were half a block out in X and Z. All cosmetic — they only move
+where a bot's head points — and all now match.
+
 Two more that are **not** deviations but look like them from the diff, and cost a reviewer time
 in the phase 5/6 pass:
 

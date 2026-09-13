@@ -267,9 +267,14 @@ public final class BlockScan {
         BlockPos faceTarget = sorted.get(0);
         BlockPos place = faceTarget.above();
 
-        bot.faceLocation(Vec3.atCenterOf(faceTarget));
+        // The lower corner, as upstream's block Location was. Aiming at the centre instead
+        // tilts the head by up to half a block in each axis, which is visible on a bot that is
+        // falling past it.
+        Vec3 face = Vec3.atLowerCornerOf(faceTarget);
+
+        bot.faceLocation(face);
         bot.look(Direction.DOWN);
-        agent.later(1, () -> bot.faceLocation(Vec3.atCenterOf(faceTarget)));
+        agent.later(1, () -> bot.faceLocation(face));
 
         bot.punch();
         placeSound(level, place);
@@ -329,7 +334,7 @@ public final class BlockScan {
 
         agent.later(15, () -> state.noFace.remove(bot));
 
-        Vec3 faceTarget = Vec3.atCenterOf(anchor).add(0, -1.5, 0);
+        Vec3 faceTarget = Vec3.atLowerCornerOf(anchor).add(0, -1.5, 0);
 
         bot.faceLocation(faceTarget);
         bot.look(Direction.DOWN);

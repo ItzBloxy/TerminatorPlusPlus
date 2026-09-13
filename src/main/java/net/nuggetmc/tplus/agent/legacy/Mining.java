@@ -106,9 +106,11 @@ public final class Mining {
         } else if (offset.isSideUp()) {
             bot.setBotPitch(PITCH_UP);
         } else if (offset == ScanOffset.AT_D || offset == ScanOffset.AT) {
-            // Aims a block below the target's centre, which points the bot's head at the
-            // block's lower face rather than through it.
-            bot.faceLocation(Vec3.atCenterOf(pos).add(0, -1, 0));
+            // Upstream: block.getLocation().add(0.5, -1, 0.5). A Bukkit block Location is its
+            // LOWER CORNER, so that is the centre of the block's footprint one whole block
+            // down -- which points the bot's head at the block's lower face rather than
+            // through it. atCenterOf would add half a block of Y that upstream did not.
+            bot.faceLocation(new Vec3(pos.getX() + 0.5, pos.getY() - 1, pos.getZ() + 0.5));
         }
 
         if (!state.miningAnim.containsKey(bot)) {
@@ -133,9 +135,9 @@ public final class Mining {
      *     ladder and keeps going, mutating the wrapper so the change persists. Upstream's
      *     comment: "Fix boat clutching while breaking block. As a side effect, the bot is able to
      *     break multiple blocks at once while over lava."
-     * <li>Six block types are hard-refused at the last moment — bedrock, barrier, command blocks,
-     *     the end portal frame, the structure block. It returns without advancing, so the task
-     *     spins forever on them rather than stopping. Faithfully wasteful.
+     * <li>Seven block types are hard-refused at the last moment — bedrock, barrier, the three
+     *     command blocks, the end portal frame and the structure block. It returns without
+     *     advancing, so the task spins forever on them rather than stopping. Faithfully wasteful.
      * </ul>
      */
     void blockBreakEffect(Bot bot, BlockPos pos, ScanOffset.Wrapper wrapper) {

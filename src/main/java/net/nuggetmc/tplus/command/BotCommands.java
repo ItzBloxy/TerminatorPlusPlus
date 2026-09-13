@@ -2,6 +2,7 @@ package net.nuggetmc.tplus.command;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -10,11 +11,14 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -122,6 +126,21 @@ public final class BotCommands {
                                     "Target offsets " + (on ? "enabled" : "disabled")), true);
                             return 1;
                         })));
+
+        // Seven arguments in the worst case, so the coordinates come as two block positions
+        // and the weights are optional on the end.
+        root.then(Commands.literal("region")
+                .then(Commands.literal("clear").executes(BotCommands::clearRegion))
+                .then(Commands.argument("from", BlockPosArgument.blockPos())
+                        .then(Commands.argument("to", BlockPosArgument.blockPos())
+                                .executes(ctx -> setRegion(ctx, 0, 0, 0))
+                                .then(Commands.argument("weightX", DoubleArgumentType.doubleArg(0))
+                                        .then(Commands.argument("weightY", DoubleArgumentType.doubleArg(0))
+                                                .then(Commands.argument("weightZ", DoubleArgumentType.doubleArg(0))
+                                                        .executes(ctx -> setRegion(ctx,
+                                                                DoubleArgumentType.getDouble(ctx, "weightX"),
+                                                                DoubleArgumentType.getDouble(ctx, "weightY"),
+                                                                DoubleArgumentType.getDouble(ctx, "weightZ")))))))));
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
         root.then(Commands.literal("list").executes(BotCommands::list));
@@ -259,6 +278,66 @@ public final class BotCommands {
         ctx.getSource().sendSuccess(() -> Component.literal("Removed bot '" + name + "'"), true);
 
         return 1;
+    }
+
+    /**
+     * Confines or biases bots to a box.
+     *
+     * <p>With all three weights at zero the box is a hard boundary — a target outside it is not
+     * a candidate at all. With non-zero weights it is a bias instead: a target outside is
+     * penalised by the weight times its squared distance out along that axis, so bots prefer
+     * what is inside the box without ignoring what is not. See {@code Targeting}.
+     */
+    private static int setRegion(CommandContext<CommandSourceStack> ctx,
+                                 double weightX, double weightY, double weightZ)
+            throws CommandSyntaxException {
+        LegacyAgent agent = legacyAgent(ctx);
+
+        if (agent == null) {
+            return 0;
+        }
+
+        BlockPos from = BlockPosArgument.getBlockPos(ctx, "from");
+        BlockPos to = BlockPosArgument.getBlockPos(ctx, "to");
+
+        // encapsulatingFullBlocks covers both blocks entirely, which is what an operator who
+        // selected two corners means. An AABB built from the raw positions would stop at their
+        // minimum corners and be one block short in each axis.
+        AABB region = AABB.encapsulatingFullBlocks(from, to);
+        boolean hard = weightX == 0 && weightY == 0 && weightZ == 0;
+
+        agent.targeting().setRegion(region, weightX, weightY, weightZ);
+
+        ctx.getSource().sendSuccess(() -> Component.literal("Region set to "
+                + describe(region) + (hard ? " (hard boundary)" : " (weighted)")), true);
+        return 1;
+    }
+
+    private static int clearRegion(CommandContext<CommandSourceStack> ctx) {
+        LegacyAgent agent = legacyAgent(ctx);
+
+        if (agent == null) {
+            return 0;
+        }
+
+        agent.targeting().setRegion(null, 0, 0, 0);
+        ctx.getSource().sendSuccess(() -> Component.literal("Region cleared"), true);
+        return 1;
+    }
+
+    private static String describe(AABB region) {
+        return "[" + (int) region.minX + ", " + (int) region.minY + ", " + (int) region.minZ
+                + "] to [" + (int) region.maxX + ", " + (int) region.maxY + ", " + (int) region.maxZ + "]";
+    }
+
+    /** The installed agent, or null with a message already sent to the source. */
+    private static LegacyAgent legacyAgent(CommandContext<CommandSourceStack> ctx) {
+        if (TerminatorPlus.registry().agent() instanceof LegacyAgent agent) {
+            return agent;
+        }
+
+        ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
+        return null;
     }
 
     private static int removeAll(CommandContext<CommandSourceStack> ctx) {

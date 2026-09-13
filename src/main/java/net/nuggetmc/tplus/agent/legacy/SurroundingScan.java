@@ -153,7 +153,8 @@ public final class SurroundingScan {
             ScanOffset offset = footprintOffset(bot, dir, found, up);
 
             if (offset != null) {
-                bot.faceLocation(Vec3.atCenterOf(found));
+                // The block's lower corner, which is what upstream's get.getLocation() was.
+                bot.faceLocation(Vec3.atLowerCornerOf(found));
                 mining.preBreak(bot, found, offset);
                 return offset;
             }
