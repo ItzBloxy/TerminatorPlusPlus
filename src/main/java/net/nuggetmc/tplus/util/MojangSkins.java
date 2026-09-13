@@ -1,5 +1,6 @@
 package net.nuggetmc.tplus.util;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.nuggetmc.tplus.TerminatorPlus;
@@ -40,8 +41,22 @@ public final class MojangSkins {
     });
 
     private static final String UUID_URL = "https://api.mojang.com/users/profiles/minecraft/";
+    /**
+     * {@code unsigned=true}, where upstream asked for {@code unsigned=false}.
+     *
+     * <p>Mojang signs a texture property against the <b>original account's</b> profile id, and
+     * a bot's profile has a fresh random id. A modern client verifies any signature it is given
+     * and drops the texture when it does not match, logging "Profile contained invalid signature
+     * for textures property" — which is exactly what play-testing found, on every bot, silently
+     * as far as the server was concerned.
+     *
+     * <p>An unsigned property carries no signature to fail, and the client renders it. The cost
+     * is that these textures are not verifiable, which for a bot nobody is authenticating is no
+     * cost at all. The alternative — keeping the signature and reusing the real account's UUID —
+     * would make every bot spawned from one name share an identity.
+     */
     private static final String SESSION_URL =
-            "https://sessionserver.mojang.com/session/minecraft/profile/%s?unsigned=false";
+            "https://sessionserver.mojang.com/session/minecraft/profile/%s?unsigned=true";
 
     private MojangSkins() {
     }
@@ -60,9 +75,14 @@ public final class MojangSkins {
                 JsonObject profile = readJson(String.format(SESSION_URL, uuid));
                 JsonObject textures = profile.getAsJsonArray("properties").get(0).getAsJsonObject();
 
+                // The signature is absent from an unsigned response, and null is what
+                // Property takes for "unsigned". Read defensively rather than assumed, so a
+                // future switch back to signed textures does not need this line changed.
+                JsonElement signature = textures.get("signature");
+
                 return new String[]{
                         textures.get("value").getAsString(),
-                        textures.get("signature").getAsString()
+                        signature == null || signature.isJsonNull() ? null : signature.getAsString()
                 };
             } catch (Exception e) {
                 TerminatorPlus.LOGGER.warn("Could not fetch skin for '{}': {}", name, e.toString());

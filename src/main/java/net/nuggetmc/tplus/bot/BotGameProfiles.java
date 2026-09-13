@@ -21,7 +21,9 @@ public final class BotGameProfiles {
     }
 
     /**
-     * @param skin a {value, signature} texture pair, or null for the default skin
+     * @param skin a {value, signature} texture pair, or null for the default skin. The signature
+     *            half is itself allowed to be null — see {@code MojangSkins.SESSION_URL} for why
+     *            bot textures are fetched unsigned.
      */
     public static GameProfile create(String name, String[] skin) {
         return create(randomSteveUuid(), name, skin);
