@@ -34,6 +34,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.nuggetmc.tplus.TerminatorPlus;
+import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.BotPhysics;
 import net.nuggetmc.tplus.motion.GroundCheck;
@@ -568,6 +569,19 @@ public class Bot extends ServerPlayer {
             level.playSound(null, pos, SoundEvents.STONE_PLACE, SoundSource.BLOCKS, 1f, 1f);
         }
     }
+
+    /**
+     * The agent that owns this bot, never null.
+     *
+     * <p>A bot always has a registry in practice — {@code BotFactory.spawn} registers before the
+     * bot enters the level — but the damage path must not NPE if one somehow does not, so an
+     * orphan gets a shared no-op.
+     */
+    public Agent agent() {
+        return registry != null ? registry.agent() : ORPHAN_AGENT;
+    }
+
+    private static final Agent ORPHAN_AGENT = Agent.noop(null);
 
     void incrementAliveTicks() {
         aliveTicks++;

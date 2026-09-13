@@ -2,6 +2,8 @@ package net.nuggetmc.tplus.bot;
 
 import net.minecraft.server.MinecraftServer;
 import net.nuggetmc.tplus.TerminatorPlus;
+import net.nuggetmc.tplus.agent.Agent;
+import net.nuggetmc.tplus.agent.AgentState;
 import net.nuggetmc.tplus.util.BotLog;
 import net.nuggetmc.tplus.util.TickScheduler;
 
@@ -30,9 +32,41 @@ public final class BotRegistry {
     private final Set<Bot> bots = ConcurrentHashMap.newKeySet();
     private final Map<Bot, Integer> failures = new HashMap<>();
     private final TickScheduler scheduler = new TickScheduler();
+    private final AgentState state = new AgentState();
+
+    /**
+     * Starts as a no-op so nothing has to null-check. Task 12 replaces it with LegacyAgent, and
+     * a test can swap in a stub.
+     */
+    private Agent agent = Agent.noop(this);
+
+    private boolean mobTarget;
 
     public TickScheduler scheduler() {
         return scheduler;
+    }
+
+    /** The shared agent state, so the registry and the agent see the same instance. */
+    public AgentState state() {
+        return state;
+    }
+
+    public Agent agent() {
+        return agent;
+    }
+
+    public void setAgent(Agent agent) {
+        this.agent.stopAllTasks();
+        this.agent = agent;
+    }
+
+    /** Whether hostile mobs may pick bots as a target. Upstream's BotManagerImpl default. */
+    public boolean isMobTarget() {
+        return mobTarget;
+    }
+
+    public void setMobTarget(boolean mobTarget) {
+        this.mobTarget = mobTarget;
     }
 
     public Collection<Bot> bots() {
@@ -52,6 +86,17 @@ public final class BotRegistry {
     public void remove(Bot bot) {
         bots.remove(bot);
         failures.remove(bot);
+        state.forget(bot);
+    }
+
+    /** Ported from {@code BotManagerImpl.getBot(int)}. */
+    public Bot byEntityId(int entityId) {
+        for (Bot bot : bots) {
+            if (bot.getId() == entityId) {
+                return bot;
+            }
+        }
+        return null;
     }
 
     public Bot byName(String name) {
@@ -66,6 +111,12 @@ public final class BotRegistry {
     /** Called once per server tick. */
     public void tick() {
         scheduler.tick();
+
+        if (agent.isEnabled()) {
+            // Per-tick setup, outside the per-bot loop: if this throws there is no single bot
+            // to blame, so it is deliberately not inside the isolation below.
+            agent.tick();
+        }
 
         for (Bot bot : List.copyOf(bots)) {
             if (!bot.isAlive() && bot.isRemoved()) {
@@ -109,11 +160,11 @@ public final class BotRegistry {
         failures.remove(bot);
     }
 
-    /**
-     * Agent hook. Plan A has no agent, so a bot only does what its entity tick does.
-     * Plan B dispatches to LegacyAgent here.
-     */
+    /** Agent hook, isolated per bot so one failure cannot stop the others. */
     private void tickBot(Bot bot) {
+        if (agent.isEnabled()) {
+            agent.tickBot(bot);
+        }
     }
 
     private void safeRemove(Bot bot) {
@@ -127,6 +178,10 @@ public final class BotRegistry {
 
     /** Removes every bot. Called on server shutdown. */
     public void reset() {
+        // Before removing anything: stopAllTasks is what cancels in-flight swing animations
+        // and shield timers, and LegacyAgent overrides it to clear the crack overlays too.
+        agent.stopAllTasks();
+
         for (Bot bot : List.copyOf(bots)) {
             safeRemove(bot);
         }
