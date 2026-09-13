@@ -13,10 +13,14 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.ResourceArgument;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -24,11 +28,13 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.nuggetmc.tplus.TerminatorPlus;
+import net.nuggetmc.tplus.agent.legacy.BlockRules;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.TargetGoal;
 import net.nuggetmc.tplus.bot.Bot;
@@ -41,6 +47,7 @@ import net.nuggetmc.tplus.util.MojangSkins;
 
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.function.Consumer;
 
@@ -225,6 +232,31 @@ public final class BotCommands {
                             return builder.buildFuture();
                         })
                         .executes(BotCommands::info)));
+
+        // Upstream's /botenvironment, as a subtree rather than a second root: one permission
+        // gate, one registration, one help. Both add/remove forms take their location variant
+        // under an `at` literal, so Brigadier reports no ambiguity between a block id and a
+        // position.
+        root.then(Commands.literal("environment")
+                .then(Commands.literal("getblock")
+                        .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                .executes(BotCommands::getBlock)))
+                .then(Commands.literal("addsolid")
+                        .then(Commands.argument("block",
+                                        ResourceArgument.resource(event.getBuildContext(), Registries.BLOCK))
+                                .executes(ctx -> setSolid(ctx, blockArgument(ctx), true)))
+                        .then(Commands.literal("at")
+                                .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                        .executes(ctx -> setSolid(ctx, blockAtPosition(ctx), true)))))
+                .then(Commands.literal("removesolid")
+                        .then(Commands.argument("block",
+                                        ResourceArgument.resource(event.getBuildContext(), Registries.BLOCK))
+                                .executes(ctx -> setSolid(ctx, blockArgument(ctx), false)))
+                        .then(Commands.literal("at")
+                                .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                        .executes(ctx -> setSolid(ctx, blockAtPosition(ctx), false)))))
+                .then(Commands.literal("listsolids").executes(BotCommands::listSolids))
+                .then(Commands.literal("clearsolids").executes(BotCommands::clearSolids)));
 
         root.then(Commands.literal("removeall").executes(BotCommands::removeAll));
         root.then(Commands.literal("list").executes(BotCommands::list));
@@ -580,6 +612,89 @@ public final class BotCommands {
 
         ctx.getSource().sendFailure(Component.literal("No legacy agent is installed."));
         return null;
+    }
+
+    /**
+     * The block at a position, for an operator who can see the thing but not its id.
+     *
+     * <p>Ported from {@code getMaterial}. Upstream parsed three coordinates itself, handled
+     * {@code ~} itself, and checked the chunk itself; {@code getLoadedBlockPos} does all three and
+     * fails with vanilla's own message.
+     */
+    private static int getBlock(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        BlockPos pos = BlockPosArgument.getLoadedBlockPos(ctx, "pos");
+        Block block = ctx.getSource().getLevel().getBlockState(pos).getBlock();
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                        "Block at [" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + "]: ")
+                .append(Component.literal(id(block)).withStyle(ChatFormatting.GREEN))
+                .append(Component.literal(BlockRules.isSolid(block.defaultBlockState())
+                        ? " (solid)" : " (not solid)")), false);
+        return 1;
+    }
+
+    /**
+     * Declares a block solid, or stops declaring it.
+     *
+     * <p>Ported from {@code addSolid} and {@code removeSolid}, which upstream wrote as forty
+     * near-identical lines twice. The only differences were the set method and three message
+     * strings, so this takes the direction as a parameter.
+     */
+    private static int setSolid(CommandContext<CommandSourceStack> ctx, Block block, boolean add) {
+        boolean changed = add ? BlockRules.addSolid(block) : BlockRules.removeSolid(block);
+
+        if (!changed) {
+            ctx.getSource().sendFailure(Component.literal(id(block)
+                    + (add ? " is already in the solid list." : " is not in the solid list.")));
+            return 0;
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                (add ? "Added " : "Removed ") + id(block)
+                        + (add ? " to" : " from") + " the solid list."), true);
+        return 1;
+    }
+
+    private static int listSolids(CommandContext<CommandSourceStack> ctx) {
+        Set<Block> blocks = BlockRules.solidOverrides();
+
+        if (blocks.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "No blocks have been declared solid."), false);
+            return 1;
+        }
+
+        String body = blocks.stream().map(BotCommands::id).sorted()
+                .collect(Collectors.joining("\n  "));
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                blocks.size() + " block(s) declared solid:\n  " + body), false);
+        return 1;
+    }
+
+    private static int clearSolids(CommandContext<CommandSourceStack> ctx) {
+        int size = BlockRules.clearSolidOverrides();
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Cleared " + size + " block(s) from the solid list."), true);
+        return 1;
+    }
+
+    private static Block blockArgument(CommandContext<CommandSourceStack> ctx)
+            throws CommandSyntaxException {
+        return ResourceArgument.getResource(ctx, "block", Registries.BLOCK).value();
+    }
+
+    private static Block blockAtPosition(CommandContext<CommandSourceStack> ctx)
+            throws CommandSyntaxException {
+        BlockPos pos = BlockPosArgument.getLoadedBlockPos(ctx, "pos");
+        return ctx.getSource().getLevel().getBlockState(pos).getBlock();
+    }
+
+    /** The registry id, which is what an operator needs for a modded block. */
+    private static String id(Block block) {
+        Identifier key = BuiltInRegistries.BLOCK.getKey(block);
+        return key == null ? block.getName().getString() : key.toString();
     }
 
     private static int removeAll(CommandContext<CommandSourceStack> ctx) {
