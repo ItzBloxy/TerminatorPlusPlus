@@ -9954,6 +9954,42 @@ the commit message. The sanctioned ones, for reference:
     surviving `/bot removeall`, and does not persist across a restart, also matching upstream
     (Plan C decisions 2 and 6).
 
+23. `/tplus create` takes armour, tools and a held item. Upstream had no equipment at spawn at all,
+    and the chain's `none` filler exists because Brigadier has no optional-in-the-middle argument
+    (Plan D decision 1).
+24. `playerlist` is an argument rather than a literal and sits at a fixed depth, so
+    `create <name> playerlist` with the count omitted no longer parses. It is
+    `create <name> 1 playerlist`.
+25. Tools are per-bot and tiered, where upstream's `LegacyItems` was one static iron set. The
+    default is still that set, so an unconfigured bot is unchanged. Omitting the argument means
+    iron; typing `none` means wood (Plan D decision 1).
+26. **Break progress is the held tool's destroy speed**, where upstream advanced one fixed crack
+    stage per run and every block took twenty ticks whatever the bot held. `Mining.STAGE_COST` is
+    defined as iron's progress in one run, so iron still takes exactly twenty and a GameTest pins
+    that number. Block hardness is still ignored, as upstream ignored it (Plan D decision 2).
+27. The tools slot floors at wood, so no bot is ever bare-handed. Two consequences:
+    `AgentState.mining` widened from `Byte` to `Short` to hold progress, and the `UNBREAKABLE`
+    refusal moved above the destroy branch — upstream's ordering was safe only while progress
+    advanced one stage at a time.
+28. `/tplus tools` is new. Upstream had no equivalent, because its tool list could not vary.
+29. `TargetGoal.ENTITY` is a new constant on an enum otherwise ported verbatim from
+    `EnumTargetGoal`.
+30. `/tplus enemytarget` is new. Upstream could name one player or a list of mob types and had no
+    way to name a specific entity. It deliberately does not reuse `CUSTOM_MOB_LIST`: that list
+    only matches under `customListMode == CUSTOM`, and three other goals read it.
+31. `/tplus playertarget` now sets the goal to PLAYER instead of telling the operator to.
+
+And two things found in Plan D that are **not** deviations:
+
+> `TargetGoal.PLAYER`'s description claims it falls back to `NEAREST_VULNERABLE_PLAYER` when no
+> player is found. It does not — the branch returns null. The description is upstream's and is
+> kept; the class javadoc now says it is wrong so the next reader does not trust it.
+
+> GameTests share a **level**, not just a JVM. `EnemyTargetTests` first asserted that a lone bot
+> found no player and failed, because tests at other structure positions had bots of their own in
+> the same level and the ENTITY scan has no range limit. Assertions about a whole-level scan must
+> be about the rule, never about the level being empty.
+
 Found by the Task 24 audit and **fixed rather than sanctioned**: four `faceLocation` calls aimed
 at a block's centre where upstream aimed at its lower corner, because a Bukkit block `Location`
 *is* the lower corner. `Mining.preBreak`'s AT case was half a block out in Y, and the footprint

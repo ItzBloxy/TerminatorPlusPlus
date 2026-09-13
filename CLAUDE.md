@@ -55,6 +55,7 @@ This is the most useful thing in this file. Each tier catches a class of defect 
 |---|---|---|
 | Signature checks against the sources jar | Compile errors, renames | Everything else |
 | Unit tests (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
+| | `Items.X` and `EntityTypes.X` resolve here; `new ItemStack(item)` does not ("Components not bound yet"). Design value types to sit on this side of that line — `EnemyTarget.matches` takes a type and a UUID rather than an `Entity` for exactly that reason | |
 | GameTests (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or a real server runtime |
 | `runServer` + RCON | Server-runtime crashes, command trees | Anything visual |
 | **A real client** | Rendering, skins, projectile collision, packet ordering | — |
@@ -69,6 +70,9 @@ nothing, and a missing skin-layer mask. Do not treat a green suite as "it works"
 
 - **`@TestHolder` is required.** Without it a test is silently unregistered and the suite still
   reports success. Five tests once sat dead this way.
+- **Tests share a level, not just a JVM.** Anything that scans the whole level sees entities
+  belonging to tests running at other structure positions, and the agent's target scan has no
+  range limit. Assert the rule — "not itself", "not the cow" — never that the level is empty.
 - **Prefer a direct call to ticking and waiting.** `move()` adds `Math.random()` to every jump, so
   any test that runs 200 ticks and asserts on position is measuring the walk, not the decision.
   Three tests passed, failed, then passed again on an unchanged build before this rule existed.
@@ -85,7 +89,15 @@ nothing, and a missing skin-layer mask. Do not treat a green suite as "it works"
 Renames and traps this port walked into:
 
 - `EntityType` constants live in `EntityTypes`; `ResourceLocation` is `Identifier`;
-  `ResourceKey.location()` is `identifier()`.
+  `ResourceKey.location()` is `identifier()` — but `TagKey` kept `.location()`. Both spellings sit
+  side by side in `ResourceOrTagArgument`'s two `asPrintable()` implementations.
+- `ServerLevel.getEntity(UUID)` is `getEntityInAnyDimension(UUID)`. `getEntity(int)` is still the
+  network-id lookup.
+- Mobs gained per-mob subpackages: `world.entity.animal.cow.Cow`,
+  `world.entity.monster.zombie.Zombie`.
+- `ResourceOrTagArgument` accepts a type or a `#tag`, and `Result.unwrap()` gives an
+  `Either<Holder.Reference, HolderSet.Named>` — so a tag can be expanded to concrete values rather
+  than kept as an opaque predicate.
 - `Direction.step()` is `getUnitVec3()`. `Blocks.CHAIN` is `Blocks.IRON_CHAIN`.
 - `Blocks.LIGHTNING_ROD` is a `WeatheringCopperCollection` — use `instanceof LightningRodBlock`.
 - Dyed families are `ColorCollection<Block>` with `.pick(DyeColor)`.

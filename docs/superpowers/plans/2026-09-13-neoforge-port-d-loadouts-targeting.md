@@ -2289,8 +2289,10 @@ but nothing reads health, so it changes how long they last and not what they do.
 ./gradlew runGameTestServer
 ```
 
-Expected: 84 + 14 unit tests (9 from Task 1, 5 from Task 5), 132 + 12 GameTests (6 from Task 2,
-6 from Task 6), all passing.
+Expected: **98 unit tests and 143 GameTests**, all passing — 14 and 12 more than before this plan.
+
+Run the unit tests with `--rerun-tasks`. Gradle's build cache will otherwise report
+`Task :test FROM-CACHE` in two seconds, which is a legitimate pass but not a run.
 
 - [ ] **Step 5: Commit**
 

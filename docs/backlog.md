@@ -58,6 +58,9 @@ they regenerate passively, and they cannot react to being hurt because nothing r
 Adding real survival behaviour means a health-aware branch in `tickBot` and a flee vector in
 `Navigation`. That is a genuine design change, not a translation.
 
+Plan D's armour changes how long a bot lasts and not what it does, which is worth being clear
+about: netherite buys time, and a bot still walks into the thing killing it.
+
 ### Bots cannot use items
 
 A bot never ticks item use — `startUsingItem` appears once, in the shield path, which is why the
@@ -69,21 +72,9 @@ piece: a use-tick. Build it once and four features become possible.
 `LegacyAgent.attack` is melee-only. A bow needs the use-tick above, plus a ranged branch in the
 attack decision and something to say when a bot prefers distance to closing.
 
-### Loadouts
-
-`/tplus give` sets one default item on already-spawned bots, so arming a squad is create-then-equip
-every time. Worth having: a named loadout (items + armour tier) applied at spawn, and
-`/tplus create <name> <count> <loadout>`.
-
-`Mining.TOOLS` is hardcoded to one iron pickaxe, axe and shovel — upstream's `LegacyItems`, kept so
-a bot never holds a diamond pickaxe it did not earn. Making the tier configurable is a small change
-to one constant plus a command.
-
-### Targeting a specific entity
-
-`/tplus playertarget` does this for players and `CUSTOM_MOB_LIST` does it by *type*. There is no
-"that ender dragon" goal. It needs a new `TargetGoal` plus an entity-selector argument, and a
-decision about what happens when the entity dies or unloads.
+Plan D closed half of this without meaning to: `/tplus create Archer 3 none none none minecraft:bow`
+arms a squad with bows at spawn. They hold them and hit people with them. The missing piece is
+still the use-tick.
 
 ### A pathfinding and goal visualiser
 
