@@ -61,7 +61,8 @@ setting the goal.
 | **Create** `src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java` | The tier table. Pure data: ten constants, two `Item[]` each, no behaviour beyond lookup | 1 |
 | **Create** `src/test/java/net/nuggetmc/tplus/bot/EquipmentTierTest.java` | Lookup, the armour/tools partition, slot order | 1 |
 | **Modify** `src/main/java/net/nuggetmc/tplus/bot/Bot.java` | Two fields: `toolTier`, `enemyTarget` | 2, 6 |
-| **Modify** `src/main/java/net/nuggetmc/tplus/agent/legacy/Mining.java` | `TOOLS` deleted; `optimalTool` takes a tier | 2 |
+| **Modify** `src/main/java/net/nuggetmc/tplus/agent/AgentState.java:82` | The progress map widens to `Short` | 2 |
+| **Modify** `src/main/java/net/nuggetmc/tplus/agent/legacy/Mining.java` | `TOOLS` deleted; `optimalTool` takes a tier; break progress scales with it | 2 |
 | **Modify** `src/gametest/java/net/nuggetmc/tplus/gametest/BotActionTests.java` | A bot mines with its own tier | 2 |
 | **Modify** `src/main/java/net/nuggetmc/tplus/command/BotCommands.java` | `ARMOR_TIERS`/`ARMOR_SLOTS` deleted; `create` chain; `tools`; `enemytarget`; `playertarget` | 3, 4, 7 |
 | **Create** `src/main/java/net/nuggetmc/tplus/bot/EnemyTarget.java` | What the ENTITY goal chases. Pure data: two sets and a label | 5 |
@@ -85,22 +86,59 @@ The chain's filler word and an absent argument are not the same thing, and they 
 | | armour | tools |
 |---|---|---|
 | argument omitted | none — today's behaviour, a bot spawns bare | **iron** — today's behaviour, upstream's `LegacyItems` |
-| argument is `none` | none | **nothing at all**, bare hands |
+| argument is `none` | none | **wood**, the floor — see decision 2 |
 
 Making an omitted tools argument mean "no tools" would change what `/tplus create Hunter 5` does,
 which is the one thing this feature must not do. So `create Hunter 5` gives iron tools and
-`create Hunter 5 none none none` gives none, and that asymmetry is deliberate. Say it in the
+`create Hunter 5 none none none` gives wood, and that asymmetry is deliberate. Say it in the
 command's feedback so an operator does not have to infer it.
 
-### 2. The tool tier changes what a bot *holds*, not how fast it mines
+### 2. The tool tier sets break speed, and wood is the floor
 
-Worth knowing before someone tests netherite and reports a bug. `Mining.blockBreakEffect` is a fixed
-ladder of ten stages at two ticks each, so every block takes twenty ticks regardless of tool or
-hardness — upstream's design, and untouched here. `optimalTool` only decides which stack goes in the
-main hand, and `ItemUtils.getLegacyAttackDamage` scores `defaultItem`, not the held tool.
+Upstream's `blockBreakEffect` advanced one crack stage every two ticks through ten stages, so **every
+block took twenty ticks** — obsidian and dirt alike, iron pickaxe or bare hands. A tier that only
+changed what sat in a bot's hand would be decoration. So progress becomes the held tool's destroy
+speed against the block:
 
-So a tier affects appearance and nothing else today. That is fine and it is still worth having; it
-is not fine to let it be discovered as a disappointment.
+```
+progress += round(speed * BREAK_PERIOD)     once per run, every 2 ticks
+stage      = min(9, progress / STAGE_COST)
+break      at progress >= STAGE_COST * 10
+```
+
+`STAGE_COST` is 12 because that is **iron's progress in one run** — iron's speed is 6.0 and the
+period is 2. An iron bot therefore advances exactly one stage per run and breaks a block in twenty
+ticks, which is upstream's number reproduced by construction rather than left to coincidence, and
+Task 2 pins it with an exact-equality test.
+
+| tier | speed | ticks per block |
+|---|---|---|
+| wood | 2.0 | 60 |
+| stone | 4.0 | 30 |
+| copper | 5.0 | 24 |
+| **iron** | **6.0** | **20 — upstream's, unchanged** |
+| diamond | 8.0 | 15 |
+| netherite | 9.0 | 14 |
+| gold | 12.0 | 10 |
+
+**Block hardness stays ignored**, as upstream ignored it. A bot tunnels at a rate set by its tools
+and not by what it is tunnelling through, so obsidian still costs what dirt costs. Bringing hardness
+in would change the agent's whole character and is not in this plan.
+
+**Wood is the floor for tools.** An empty hand scores 1.0 against everything, which is 120 ticks a
+block — six times upstream's twenty, as the consequence of skipping an argument. `none` still parses
+in the tools slot because it is the chain's filler word, and it resolves to wood. The clamp lives in
+`Bot.setToolTier` so no caller can route around it, and `EquipmentTier.asToolTier()` is its single
+definition, so the clamp and the message an operator reads cannot disagree.
+
+Two consequences fall out of the accumulator, and both are easy to miss:
+
+- **`AgentState.mining` widens from `Byte` to `Short`.** Diamond's step is 16, so progress can reach
+  128 before it is checked, and a byte tops out at 127.
+- **The `UNBREAKABLE` refusal has to move above the destroy branch.** Upstream checked it
+  afterwards, which was safe only because an unbreakable block never advanced a stage and so never
+  reached nine. Progress is no longer capped at one step per run, so a netherite bot would overshoot
+  straight past the check and destroy bedrock.
 
 ### 3. `EnemyTarget.matches` takes a type and a UUID, not an `Entity`
 
@@ -435,7 +473,8 @@ public enum EquipmentTier {
 ./gradlew test --tests '*EquipmentTierTest*'
 ```
 
-Expected: BUILD SUCCESSFUL, 8 tests.
+Expected: BUILD SUCCESSFUL, 8 tests. A ninth, `theToolsSlotFloorsAtWood`, arrives in Task 2 with
+the method it covers.
 
 If instead it fails at class-load with a registry error rather than an assertion, the `Items`
 constants need bootstrapping — but `ItemUtilsTest` already resolves them without one, so treat that
@@ -455,18 +494,37 @@ git commit -m "feat: add the equipment tier table"
 
 **Files:**
 - Modify: `src/main/java/net/nuggetmc/tplus/bot/Bot.java`
-- Modify: `src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java` (add `equipArmor`)
-- Modify: `src/main/java/net/nuggetmc/tplus/agent/legacy/Mining.java:52-55, 411-426`
+- Modify: `src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java` (add `asToolTier`, `equipArmor`)
+- Modify: `src/main/java/net/nuggetmc/tplus/agent/AgentState.java:82`
+- Modify: `src/main/java/net/nuggetmc/tplus/agent/legacy/Mining.java:39-55, 93-218, 411-426`
 - Test: `src/gametest/java/net/nuggetmc/tplus/gametest/BotActionTests.java`
 
-Task 1 built the table and unit tested it. This task is the two places it is read: a bot's tools,
-and a bot's four armour slots. The armour half needs a GameTest rather than a unit test because
-equipping builds `ItemStack`s, and the unit tier cannot.
+Task 1 built the table and unit tested it. This is the three places it is read: a bot's four armour
+slots, which tool goes in its hand, and **how fast that tool breaks a block**. All three need a
+GameTest rather than a unit test, because all three build `ItemStack`s.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Append to `BotActionTests`, **before the first `@GameTest` method in the outer class** — a test
-appended into a nested class is silently not a test. Follow the file's existing `spawn` helper.
+appended into a nested class is silently not a test, and five once sat dead that way.
+
+Two helpers first. Note where the block goes: `ScanOffset.AT` is `origin.above()`, so the block a
+bot mines with `AT` is the one in its own head space, not the one in front of it.
+
+```java
+    /** A bot with a tier, and a stone block in its head space, which is where ScanOffset.AT points. */
+    private static Bot miner(ExtendedGameTestHelper helper, BotRegistry registry,
+                             int x, int z, EquipmentTier tier) {
+        Bot bot = spawn(helper, registry, new BlockPos(x, 1, z));
+        bot.setToolTier(tier);
+        helper.setBlock(new BlockPos(x, 2, z), Blocks.STONE);
+        return bot;
+    }
+
+    private static boolean isAir(ExtendedGameTestHelper helper, int x, int y, int z) {
+        return helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z))).isAir();
+    }
+```
 
 ```java
     @GameTest(timeoutTicks = 100)
@@ -476,45 +534,15 @@ appended into a nested class is silently not a test. Follow the file's existing 
         BotRegistry registry = new BotRegistry();
         registry.setAgent(new LegacyAgent(registry));
 
-        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
-        bot.setToolTier(EquipmentTier.NETHERITE);
-
-        BlockPos target = new BlockPos(4, 1, 3);
-        helper.setBlock(target, Blocks.STONE);
+        Bot bot = miner(helper, registry, 3, 3, EquipmentTier.NETHERITE);
 
         // A direct preBreak call, not 200 ticks of hunting. move() adds Math.random() to every
         // jump, so a ticked test measures the walk rather than the tool choice.
         new Mining(registry.state(), registry.agent())
-                .preBreak(bot, helper.absolutePos(target), ScanOffset.AT);
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
 
         helper.assertTrue(bot.getMainHandItem().is(Items.NETHERITE_PICKAXE),
                 "a netherite bot must mine stone with its own pickaxe, not an iron one");
-
-        registry.reset();
-        helper.succeed();
-    }
-
-    @GameTest(timeoutTicks = 100)
-    @EmptyTemplate(value = "7x5x7", floor = true)
-    @TestHolder("a_bot_with_no_tools_mines_bare_handed")
-    static void a_bot_with_no_tools_mines_bare_handed(ExtendedGameTestHelper helper) {
-        BotRegistry registry = new BotRegistry();
-        registry.setAgent(new LegacyAgent(registry));
-
-        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
-        bot.setToolTier(EquipmentTier.NONE);
-
-        BlockPos target = new BlockPos(4, 1, 3);
-        helper.setBlock(target, Blocks.STONE);
-
-        new Mining(registry.state(), registry.agent())
-                .preBreak(bot, helper.absolutePos(target), ScanOffset.AT);
-
-        // `none` genuinely means none. optimalTool's loop runs zero times and returns EMPTY,
-        // which is a different outcome from omitting the argument at create time -- that
-        // leaves the iron default. Decision 1.
-        helper.assertTrue(bot.getMainHandItem().isEmpty(),
-                "the NONE tier must leave a bot bare-handed");
 
         registry.reset();
         helper.succeed();
@@ -527,18 +555,128 @@ appended into a nested class is silently not a test. Follow the file's existing 
         BotRegistry registry = new BotRegistry();
         registry.setAgent(new LegacyAgent(registry));
 
-        // Nothing calls setToolTier. This is the test that keeps making the tier configurable
-        // a change in capability rather than a change in behaviour.
+        // Nothing calls setToolTier. This is the test that keeps making the tier configurable a
+        // change in capability rather than a change in behaviour.
         Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
-
-        BlockPos target = new BlockPos(4, 1, 3);
-        helper.setBlock(target, Blocks.STONE);
+        helper.setBlock(new BlockPos(3, 2, 3), Blocks.STONE);
 
         new Mining(registry.state(), registry.agent())
-                .preBreak(bot, helper.absolutePos(target), ScanOffset.AT);
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
 
         helper.assertTrue(bot.getMainHandItem().is(Items.IRON_PICKAXE),
                 "an unconfigured bot must still mine with iron");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("the_none_tier_floors_at_wood")
+    static void the_none_tier_floors_at_wood(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = spawn(helper, registry, new BlockPos(3, 1, 3));
+        bot.setToolTier(EquipmentTier.NONE);
+
+        // `none` has to parse in the tools slot because it is the create chain's filler word,
+        // but a bare-handed bot scores 1.0 against everything and would take 120 ticks a block --
+        // six times upstream's twenty, as the result of skipping an argument. Decision 2.
+        helper.assertTrue(bot.getToolTier() == EquipmentTier.WOOD,
+                "the none tier must floor at wood for tools");
+
+        helper.setBlock(new BlockPos(3, 2, 3), Blocks.STONE);
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        helper.assertTrue(bot.getMainHandItem().is(Items.WOODEN_PICKAXE),
+                "and it must mine with a wooden pickaxe, not an empty hand");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "7x5x7", floor = true)
+    @TestHolder("iron_still_breaks_a_block_in_twenty_ticks")
+    static void iron_still_breaks_a_block_in_twenty_ticks(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+
+        Bot bot = miner(helper, registry, 3, 3, EquipmentTier.IRON);
+
+        new Mining(registry.state(), registry.agent())
+                .preBreak(bot, helper.absolutePos(new BlockPos(3, 2, 3)), ScanOffset.AT);
+
+        // Only the scheduler is ticked, deliberately: ticking the registry would run the agent,
+        // the agent moves bots, and the break task cancels itself the moment the bot is no
+        // longer aiming at the block. Ticking the scheduler alone makes this exact.
+        int ticks = 0;
+
+        for (int tick = 1; tick <= 100 && ticks == 0; tick++) {
+            registry.scheduler().tick();
+
+            if (isAir(helper, 3, 2, 3)) {
+                ticks = tick;
+            }
+        }
+
+        // The anchor for the whole speed change. Upstream advanced one fixed stage every two
+        // ticks, so every block took twenty ticks whatever the bot held; STAGE_COST is defined
+        // as iron's progress in one run precisely so that iron still does. If this number moves,
+        // the speed model has drifted off upstream rather than extended it.
+        helper.assertValueEqual(ticks, 20, "iron must still break a block in exactly twenty ticks");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x5x7", floor = true)
+    @TestHolder("a_better_tool_breaks_a_block_sooner")
+    static void a_better_tool_breaks_a_block_sooner(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        registry.setAgent(new LegacyAgent(registry));
+        Mining mining = new Mining(registry.state(), registry.agent());
+
+        // Three bots in three columns. They do not interact: each break task is keyed on its own
+        // block position and re-derives its target from its own bot.
+        Bot wood = miner(helper, registry, 2, 3, EquipmentTier.WOOD);
+        Bot iron = miner(helper, registry, 6, 3, EquipmentTier.IRON);
+        Bot netherite = miner(helper, registry, 10, 3, EquipmentTier.NETHERITE);
+
+        mining.preBreak(wood, helper.absolutePos(new BlockPos(2, 2, 3)), ScanOffset.AT);
+        mining.preBreak(iron, helper.absolutePos(new BlockPos(6, 2, 3)), ScanOffset.AT);
+        mining.preBreak(netherite, helper.absolutePos(new BlockPos(10, 2, 3)), ScanOffset.AT);
+
+        int woodTicks = 0;
+        int ironTicks = 0;
+        int netheriteTicks = 0;
+
+        // One scheduler drives all three, so they are measured against the same clock rather
+        // than in three separate runs. Wood is the slowest at 60 ticks, so it ends the loop.
+        for (int tick = 1; tick <= 100 && woodTicks == 0; tick++) {
+            registry.scheduler().tick();
+
+            if (netheriteTicks == 0 && isAir(helper, 10, 2, 3)) {
+                netheriteTicks = tick;
+            }
+            if (ironTicks == 0 && isAir(helper, 6, 2, 3)) {
+                ironTicks = tick;
+            }
+            if (woodTicks == 0 && isAir(helper, 2, 2, 3)) {
+                woodTicks = tick;
+            }
+        }
+
+        // Asserted as an ordering rather than three exact numbers: the exact ones are pinned by
+        // iron_still_breaks_a_block_in_twenty_ticks, and this is the property that makes the
+        // tier worth setting at all.
+        helper.assertTrue(netheriteTicks > 0 && netheriteTicks < ironTicks,
+                "netherite (" + netheriteTicks + ") must beat iron (" + ironTicks + ")");
+        helper.assertTrue(ironTicks > 0 && ironTicks < woodTicks,
+                "iron (" + ironTicks + ") must beat wood (" + woodTicks + ")");
 
         registry.reset();
         helper.succeed();
@@ -553,7 +691,7 @@ appended into a nested class is silently not a test. Follow the file's existing 
 
         EquipmentTier.DIAMOND.equipArmor(bot);
 
-        // EquipmentTierTest pins armorPiece(i) against ARMOR_SLOTS[i], but only in the table.
+        // EquipmentTierTest pins armorPiece(i) against ARMOR_SLOTS[i], but only inside the table.
         // This is the pairing itself: transpose the two and a bot wears its boots on its head,
         // which nothing else in the codebase would notice and which no unit test can reach,
         // because equipping builds ItemStacks.
@@ -562,8 +700,8 @@ appended into a nested class is silently not a test. Follow the file's existing 
         helper.assertTrue(bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE), "chest");
         helper.assertTrue(bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET), "head");
 
-        // NONE strips all four through the same loop that filled them -- armorPiece returns
-        // null past the end of its empty array rather than throwing.
+        // NONE strips all four through the same loop that filled them -- armorPiece returns null
+        // past the end of its empty array rather than throwing.
         EquipmentTier.NONE.equipArmor(bot);
 
         for (EquipmentSlot slot : EquipmentTier.ARMOR_SLOTS) {
@@ -579,8 +717,8 @@ Add whatever of these imports the file does not already have:
 
 ```java
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.Mining;
 import net.nuggetmc.tplus.agent.legacy.ScanOffset;
@@ -595,40 +733,23 @@ import net.nuggetmc.tplus.bot.EquipmentTier;
 
 Expected: compilation failure — `cannot find symbol: method setToolTier(EquipmentTier)`.
 
-- [ ] **Step 3: Add the field to `Bot`**
-
-In `Bot.java`, beside the other per-bot target and item state (next to `targetPlayer`):
+- [ ] **Step 3: Add `asToolTier` and `equipArmor` to `EquipmentTier`**
 
 ```java
     /**
-     * What {@code Mining.optimalTool} may choose from.
+     * This tier when it is used for tools: {@link #NONE} becomes {@link #WOOD}.
      *
-     * <p>Upstream had no such field: {@code LegacyItems} was one static iron set for every bot.
-     * Defaulting to {@link EquipmentTier#IRON} is that set exactly, so making this configurable
-     * changed what a bot <i>can</i> do and not what an unconfigured one does.
+     * <p>{@code none} has to parse in the tools slot because it is the {@code /tplus create}
+     * chain's filler word, but there is no bare-handed tier — break progress is the held tool's
+     * destroy speed, and an empty hand scores 1.0 against everything, which is 120 ticks a block.
+     *
+     * <p>One definition, called by both {@code Bot.setToolTier} and the commands' feedback, so
+     * the clamp and the message an operator reads cannot disagree.
      */
-    private EquipmentTier toolTier = EquipmentTier.IRON;
-```
-
-and the accessors, beside `getTargetPlayer`:
-
-```java
-    public EquipmentTier getToolTier() {
-        return toolTier;
+    public EquipmentTier asToolTier() {
+        return this == NONE ? WOOD : this;
     }
 
-    public void setToolTier(EquipmentTier tier) {
-        this.toolTier = tier;
-    }
-```
-
-- [ ] **Step 4: Add `equipArmor` to `EquipmentTier`**
-
-The tier knows how to wear itself, rather than a command knowing how to dress a bot. That keeps the
-index-to-slot pairing in the same file as the table it indexes, and makes it reachable from a
-GameTest -- a private helper in `BotCommands` would not be.
-
-```java
     /**
      * Puts this tier's four pieces on a bot, clearing any slot the tier has nothing for.
      *
@@ -638,6 +759,9 @@ GameTest -- a private helper in `BotCommands` would not be.
      * <p>Upstream wrote the Bukkit inventory <i>and</i> sent the equipment packets, with the
      * comment "packet sending to ensure"; {@code Bot.setItem(stack, slot)} already does both, so
      * one call per slot is enough.
+     *
+     * <p>Lives here rather than in {@code BotCommands} so the index-to-slot pairing sits beside
+     * the table it indexes, and so a GameTest can reach it.
      */
     public void equipArmor(Bot bot) {
         for (int i = 0; i < ARMOR_SLOTS.length; i++) {
@@ -650,13 +774,193 @@ GameTest -- a private helper in `BotCommands` would not be.
 
 Add `import net.minecraft.world.item.ItemStack;`.
 
-- [ ] **Step 5: Move the tool list out of `Mining`**
+Add the matching unit test to `EquipmentTierTest`, and run `./gradlew test --tests '*EquipmentTierTest*'`:
 
-Delete the `TOOLS` constant at `Mining.java:52-55` **and its javadoc at 39-51**, and move what that
-javadoc says into `EquipmentTier` — the "Components not bound yet" paragraph is already there, and
-the `LegacyItems` provenance is on `IRON`.
+```java
+    @Test
+    void theToolsSlotFloorsAtWood() {
+        // `none` parses in the tools slot because it is the create chain's filler, but there is
+        // no bare-handed tier: break progress is the tool's destroy speed and an empty hand
+        // scores 1.0 against everything.
+        assertSame(EquipmentTier.WOOD, EquipmentTier.NONE.asToolTier());
 
-Change the signature and the loop at `Mining.java:411-426`:
+        for (EquipmentTier tier : EquipmentTier.values()) {
+            if (tier != EquipmentTier.NONE) {
+                assertSame(tier, tier.asToolTier(), tier.id() + " must be left alone");
+            }
+
+            if (tier.acceptsAsTools()) {
+                assertFalse(tier.asToolTier().tools().isEmpty(),
+                        tier.id() + " parses in the tools slot and must yield real tools");
+            }
+        }
+    }
+```
+
+- [ ] **Step 4: Add the field to `Bot`**
+
+Beside `targetPlayer`:
+
+```java
+    /**
+     * What {@code Mining.optimalTool} may choose from, and therefore how fast this bot breaks a
+     * block.
+     *
+     * <p>Upstream had no such field: {@code LegacyItems} was one static iron set for every bot.
+     * Defaulting to {@link EquipmentTier#IRON} is that set exactly, so making this configurable
+     * changed what a bot <i>can</i> do and not what an unconfigured one does.
+     */
+    private EquipmentTier toolTier = EquipmentTier.IRON;
+```
+
+and the accessors, beside `setTargetPlayer`:
+
+```java
+    public EquipmentTier getToolTier() {
+        return toolTier;
+    }
+
+    /**
+     * Sets the tier {@code Mining.optimalTool} may choose from.
+     *
+     * <p>{@link EquipmentTier#NONE} floors at {@link EquipmentTier#WOOD}. The clamp is applied
+     * here rather than at the command so that no caller can route around it and leave a bot
+     * bare-handed, which is six times upstream's twenty ticks a block.
+     */
+    public void setToolTier(EquipmentTier tier) {
+        this.toolTier = tier.asToolTier();
+    }
+```
+
+Add `import net.nuggetmc.tplus.bot.EquipmentTier;` — not needed, same package. Check before adding.
+
+- [ ] **Step 5: Widen the progress map**
+
+`AgentState.java:82`. Diamond's step is 16, so progress reaches 128 before it is checked, and a
+byte tops out at 127:
+
+```java
+    /**
+     * Mining task id to accumulated break progress, 0 to {@code Mining.BREAK_COST}.
+     *
+     * <p>Was the crack stage, 0 through 9, when every block took a fixed twenty ticks. It is now
+     * progress, because a stage is no longer a fixed number of ticks — see
+     * {@code Mining.blockBreakEffect}. {@code Short} rather than {@code Byte} because a fast tool
+     * can push progress past 127 in the run that breaks the block.
+     */
+    public final Map<Integer, Short> mining = new HashMap<>();
+```
+
+- [ ] **Step 6: Move the tool list out of `Mining` and make progress scale**
+
+Delete the `TOOLS` constant at `Mining.java:52-55` **and its javadoc at 39-51** — the
+"Components not bound yet" paragraph and the `LegacyItems` provenance both live on `EquipmentTier`
+now.
+
+Add the three constants in its place:
+
+```java
+    /** Ticks between runs of the break task. Upstream's, unchanged. */
+    private static final int BREAK_PERIOD = 2;
+
+    /**
+     * Break progress one crack stage costs.
+     *
+     * <p>Defined as <b>iron's progress in one run</b>: iron's mining speed is 6.0 and the task
+     * runs every {@value #BREAK_PERIOD} ticks. An iron bot therefore advances exactly one stage
+     * per run and breaks a block in twenty ticks, which is upstream's flat behaviour reproduced
+     * by construction rather than by coincidence. Every other tier is faster or slower than that
+     * anchor: wood 60 ticks, stone 30, copper 24, diamond 15, netherite 14, gold 10.
+     */
+    private static final int STAGE_COST = 12;
+
+    /** Crack stages a block goes through. A protocol constant: the packet carries 0..9. */
+    private static final int STAGES = 10;
+
+    /** Progress that breaks a block. */
+    private static final int BREAK_COST = STAGE_COST * STAGES;
+```
+
+Rewrite the `blockBreakEffect` javadoc's first paragraph and the run body. The cancellation checks,
+the lava re-aim and the `finish` calls are untouched; what changes is that a fixed `stage + 1`
+becomes an accumulating `progress + speed`:
+
+```java
+        taskId[0] = agent.repeating(BREAK_PERIOD, () -> {
+            short progress = state.mining.getOrDefault(taskId[0], (short) 0);
+
+            BlockPos current = currentTarget(bot, wrapper);
+            current = adjustForLava(bot, level, pos, current, wrapper);
+
+            BlockState currentState = current == null ? null : level.getBlockState(current);
+
+            // Upstream compared both the position and the block type: the bot has to still be
+            // aiming at this block, and it has to still be the same kind of block.
+            if (!bot.isBotAlive() || current == null || !pos.equals(current)
+                    || currentState.getBlock() != level.getBlockState(pos).getBlock()) {
+                finish(bot, ref, taskId[0], pos);
+                return;
+            }
+
+            BlockState state0 = level.getBlockState(pos);
+            SoundEvent sound = LegacyUtils.breakBlockSound(state0);
+
+            // Upstream advanced one fixed stage per run, so every block took twenty ticks
+            // whatever the bot held. Progress is now the held tool's destroy speed against this
+            // block, which is the whole point of a bot having a tool tier. Block *hardness* is
+            // still ignored, as upstream ignored it: a bot tunnels at a rate set by its tools
+            // and not by what it is tunnelling through.
+            float speed = bot.getMainHandItem().getDestroySpeed(state0);
+            short next = (short) (progress + Math.max(1, Math.round(speed * BREAK_PERIOD)));
+
+            // Read before the destroy branch, not after it as upstream read it. Upstream was
+            // safe because an unbreakable block never advanced a stage and so never reached
+            // nine; progress is no longer capped at one step per run, so a netherite bot would
+            // overshoot straight past the check.
+            boolean unbreakable = UNBREAKABLE.contains(state0.getBlock());
+
+            if (!unbreakable && next >= BREAK_COST) {
+                if (sound != null) {
+                    level.playSound(null, pos, sound, SoundSource.BLOCKS, 1f, 1f);
+                }
+
+                level.destroyBlock(pos, true, bot);
+
+                if (wrapper.get() == ScanOffset.ABOVE) {
+                    // Breaking the block overhead then jumping into the hole is how a bot gets
+                    // itself stuck, so jumping is suppressed for 15 ticks.
+                    state.noJump.add(bot);
+                    agent.later(15, () -> state.noJump.remove(bot));
+                }
+
+                finish(bot, ref, taskId[0], pos);
+                return;
+            }
+
+            if (sound != null) {
+                level.playSound(null, pos, sound, SoundSource.BLOCKS, 0.3f, 1f);
+            }
+
+            // No store, so the task spins here forever rather than stopping. Faithfully
+            // wasteful, and unchanged: the sound still plays every run on an unbreakable block.
+            if (unbreakable) {
+                return;
+            }
+
+            if (BlockRules.isInstantBreak(state0)) {
+                level.destroyBlock(pos, true, bot);
+                return;
+            }
+
+            BotFactory.broadcastCrack(bot, state.crackList.get(ref), pos,
+                    Math.min(STAGES - 1, next / STAGE_COST));
+            state.mining.put(taskId[0], next);
+        });
+
+        state.mining.put(taskId[0], (short) 0);
+```
+
+Then the `optimalTool` signature and its one call site:
 
 ```java
     /**
@@ -668,7 +972,8 @@ Change the signature and the loop at `Mining.java:411-426`:
      * vanilla equivalent and is the tool's multiplier for that block, same orientation.
      *
      * <p>The tier is a parameter rather than the static list upstream had, so two bots can carry
-     * different tools. {@link EquipmentTier#NONE} has no tools and always returns an empty hand.
+     * different tools — and since {@code blockBreakEffect} reads the held stack's destroy speed,
+     * this is also what decides how fast the block comes down.
      */
     static ItemStack optimalTool(EquipmentTier tier, BlockState target) {
         ItemStack optimal = ItemStack.EMPTY;
@@ -688,33 +993,37 @@ Change the signature and the loop at `Mining.java:411-426`:
     }
 ```
 
-And the one call site, `Mining.java:97`:
+`Mining.java:97`:
 
 ```java
         bot.setItem(optimalTool(bot.getToolTier(), target));
 ```
 
-Then fix imports: `Mining` no longer needs `net.minecraft.world.item.Items` **if nothing else in
-the file uses it** — it does, `placeWaterDown` uses `Items.WATER_BUCKET`, so leave it. Add
-`import net.nuggetmc.tplus.bot.EquipmentTier;`. `java.util.List` may now be unused; check before
-removing it.
+Fix imports: add `net.nuggetmc.tplus.bot.EquipmentTier`. `Items` stays — `placeWaterDown` uses
+`Items.WATER_BUCKET`. `java.util.List` may now be unused; check before removing it.
 
-- [ ] **Step 6: Run the tests and watch them pass**
+- [ ] **Step 7: Run the tests and watch them pass**
 
 ```bash
 ./gradlew runGameTestServer
 ```
 
-Expected: all tests pass, four more than before. The whole run takes about 10 seconds.
+Expected: all tests pass, six more than before. The whole run takes about 10 seconds.
 
-- [ ] **Step 7: Commit**
+If `iron_still_breaks_a_block_in_twenty_ticks` reports 22 rather than 20, the destroy branch is
+testing `progress` instead of `next` and the ladder has gained a rung. If it reports 0, the task
+cancelled — check the block is at `(x, 2, z)` and not in front of the bot.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/main/java/net/nuggetmc/tplus/bot/Bot.java \
         src/main/java/net/nuggetmc/tplus/bot/EquipmentTier.java \
+        src/main/java/net/nuggetmc/tplus/agent/AgentState.java \
         src/main/java/net/nuggetmc/tplus/agent/legacy/Mining.java \
+        src/test/java/net/nuggetmc/tplus/bot/EquipmentTierTest.java \
         src/gametest/java/net/nuggetmc/tplus/gametest/BotActionTests.java
-git commit -m "feat: give each bot its own tool tier and equipment"
+git commit -m "feat: scale break speed with a bot's own tool tier"
 ```
 
 ---
@@ -807,22 +1116,29 @@ Replace the body of `armor`:
      * would be the only one of the three equipment properties that can be set at spawn and never
      * changed afterwards.
      *
-     * <p>This changes what a bot <i>holds</i> while mining, not how fast it mines —
-     * {@code blockBreakEffect} is a fixed ten-stage ladder at two ticks a stage regardless of
-     * tool or block hardness, which is upstream's design and is untouched.
+     * <p>This is what decides how fast a bot breaks a block: {@code blockBreakEffect} accrues
+     * the held tool's destroy speed. Block hardness is still ignored, as upstream ignored it.
+     * {@code none} floors at wood — there is no bare-handed tier.
      */
     private static int tools(CommandContext<CommandSourceStack> ctx) {
-        EquipmentTier tier = tier(ctx.getSource(), StringArgumentType.getString(ctx, "tier"), false);
+        EquipmentTier requested = tier(ctx.getSource(),
+                StringArgumentType.getString(ctx, "tier"), false);
 
-        if (tier == null) {
+        if (requested == null) {
             return 0;
         }
 
+        // Resolved here as well as inside setToolTier so the message names the tier the bots
+        // actually got. asToolTier is the single definition of the floor, so the two cannot
+        // disagree.
+        EquipmentTier applied = requested.asToolTier();
+
         Collection<Bot> bots = TerminatorPlus.registry().bots();
-        bots.forEach(bot -> bot.setToolTier(tier));
+        bots.forEach(bot -> bot.setToolTier(applied));
 
         ctx.getSource().sendSuccess(() -> Component.literal(
-                "Set tool tier '" + tier.id() + "' for " + bots.size() + " bot(s)"), true);
+                "Set tool tier '" + applied.id() + "' for " + bots.size() + " bot(s)"
+                        + (applied == requested ? "" : " ('none' floors at wood)")), true);
         return 1;
     }
 ```
@@ -856,15 +1172,17 @@ GameTests never register a command, so this tier is the only thing that runs the
 ```bash
 ./gradlew runServer > /tmp/tplus-server.log 2>&1 &
 python tools/rcon.py "tplus create Smith 2" "tplus armor copper" "tplus tools netherite" \
-                     "tplus armor wood" "tplus tools chain" "tplus removeall" "stop"
+                     "tplus tools none" "tplus armor wood" "tplus tools chain" \
+                     "tplus removeall" "stop"
 ```
 
-Expected, in order: two bots; copper armour set for 2; netherite tools set for 2; **`'wood' is not a
-valid armour tier. Available: none, leather, chain, copper, gold, iron, diamond, netherite`**;
-**`'chain' is not a valid tools tier. Available: none, wood, stone, copper, gold, iron, diamond,
-netherite`**; two removed.
+Expected, in order: two bots; copper armour set for 2; netherite tools set for 2; **`Set tool tier
+'wood' for 2 bot(s) ('none' floors at wood)`**; **`'wood' is not a valid armour tier. Available:
+none, leather, chain, copper, gold, iron, diamond, netherite`**; **`'chain' is not a valid tools
+tier. Available: none, wood, stone, copper, gold, iron, diamond, netherite`**; two removed.
 
-The two rejections are the point of the step — they are what proves the slots differ.
+The two rejections are half the point of the step — they are what proves the slots differ. The
+floor message is the other half: `none` must be accepted there and must say what it did.
 
 - [ ] **Step 6: Commit**
 
@@ -973,6 +1291,11 @@ present" query and throws on a missing name.
             if (tools == null) {
                 return 0;
             }
+
+            // `none` in the tools slot is the chain's filler and floors at wood. Resolved here
+            // so the feedback names what the bots actually got; setToolTier applies the same
+            // clamp regardless.
+            tools = tools.asToolTier();
         }
 
         // Built here, on the command thread, rather than inside the async skin callback: the
@@ -1060,7 +1383,8 @@ python tools/rcon.py \
 ```
 
 Expected: A–F succeed, each reporting its own gear; `C` says "in the player list"; `A`, `B` and `C`
-report `none armour, iron tools`; `F` reports `none armour, none tools and Bow`. `G` fails with the
+report `none armour, iron tools`; `F` reports `none armour, wood tools and Bow` -- `none` floors
+at wood. `G` fails with the
 armour-tier message. `H` fails with `'maybe' must be 'playerlist' or 'none'`.
 
 The log must contain **no `Ambiguity` warning** for the `create` node. A word argument and an
@@ -1857,7 +2181,10 @@ Join, op yourself **after** joining (offline mode guesses a UUID for a name it h
 
 - [ ] All three bots wear netherite, all four pieces, visible on the model.
 - [ ] All three hold a bow.
-- [ ] `/tplus tools none` then watch one mine — bare hands, no phantom item.
+- [ ] `/tplus tools none` then watch one mine — a wooden pickaxe, visibly slower. `none` floors
+      at wood, so there is no bare-handed bot to see.
+- [ ] `/tplus tools netherite` and `/tplus tools wood` on two squads mining the same wall: the
+      difference should be obvious without a stopwatch, roughly 14 ticks a block against 60.
 - [ ] `/tplus armor leather` restyles them and `/tplus armor none` strips them, with no ghost
       pieces left behind. Equipment packets are sent by hand for bots, so a stale slot is exactly
       the kind of thing this tier exists to catch.
@@ -1893,7 +2220,14 @@ Continuing from 21:
     `create <name> 1 playerlist`.
 24. Tools are per-bot and tiered, where upstream's `LegacyItems` was one static iron set. The
     default is still that set, so an unconfigured bot is unchanged. Omitting the argument means
-    iron; typing `none` means no tools (Plan D decision 1).
+    iron; typing `none` means wood (Plan D decision 1).
+24a. **Break progress is the held tool's destroy speed**, where upstream advanced one fixed crack
+    stage per run and every block took twenty ticks whatever the bot held. `STAGE_COST` is defined
+    as iron's progress in one run, so iron still takes exactly twenty. Block hardness is still
+    ignored, as upstream ignored it (Plan D decision 2).
+24b. The tools slot floors at wood, so no bot is ever bare-handed. `AgentState.mining` widened from
+    `Byte` to `Short` to hold progress, and the `UNBREAKABLE` refusal moved above the destroy
+    branch — upstream's ordering was safe only while progress advanced one stage at a time.
 25. `/tplus tools` is new. Upstream had no equivalent, because its tool list could not vary.
 26. `TargetGoal.ENTITY` is a new constant on an enum otherwise ported verbatim from
     `EnumTargetGoal`.
@@ -1936,7 +2270,8 @@ not ("Components not bound yet"). Design value types to be testable on that side
 
 Delete the **Loadouts** and **Targeting a specific entity** sections — both are now built. In
 **Ranged attacks**, note that `/tplus create … minecraft:bow` now arms a bot with one and the
-missing piece is still the use-tick. In **Bots have no self-preservation**, note armour now exists
+missing piece is still the use-tick. In the **Loadouts** section, the claim that
+`Mining.TOOLS` is hardcoded to one iron set is now false, and the whole section goes. In **Bots have no self-preservation**, note armour now exists
 but nothing reads health, so it changes how long they last and not what they do.
 
 - [ ] **Step 4: Full verification from clean**
@@ -1946,7 +2281,7 @@ but nothing reads health, so it changes how long they last and not what they do.
 ./gradlew runGameTestServer
 ```
 
-Expected: 84 + 13 unit tests (8 from Task 1, 5 from Task 5), 132 + 10 GameTests (4 from Task 2,
+Expected: 84 + 14 unit tests (9 from Task 1, 5 from Task 5), 132 + 12 GameTests (6 from Task 2,
 6 from Task 6), all passing.
 
 - [ ] **Step 5: Commit**

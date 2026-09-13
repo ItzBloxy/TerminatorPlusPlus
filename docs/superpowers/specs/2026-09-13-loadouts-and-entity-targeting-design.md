@@ -37,7 +37,8 @@ types; nothing names *that* entity. There is no way to say "kill the ender drago
 **In:**
 
 - Armour, tools and a held item as arguments to `/tplus create`.
-- A per-bot tool tier, replacing `Mining`'s hardcoded iron.
+- A per-bot tool tier, replacing `Mining`'s hardcoded iron, and **break speed that scales
+  with it**.
 - `/tplus tools <tier>` for bots that already exist.
 - `/tplus enemytarget generic|specific`, a new `TargetGoal.ENTITY`, and per-bot enemy-target state.
 - Both targeting commands set the goal themselves.
@@ -140,6 +141,45 @@ bot.setItem(optimalTool(bot.getToolTier(), target));
 
 `Bot` gains `EquipmentTier toolTier`, defaulting to `IRON`. A bot nobody configured mines exactly as
 it does today, which is what keeps this a divergence in capability rather than in behaviour.
+
+### Break speed scales with the tier
+
+Upstream's `blockBreakEffect` advanced one crack stage every two ticks through ten stages, so **every
+block took twenty ticks** — obsidian and dirt alike, iron pickaxe or bare hands. A tier that only
+changed what sat in a bot's hand would be decoration, so progress becomes the held tool's destroy
+speed against the block:
+
+```
+progress += round(speed * 2)     once per run, every 2 ticks
+stage      = min(9, progress / 12)
+break      at progress >= 120
+```
+
+The 12 is not arbitrary: it is **iron's progress in one run**, iron's speed being 6.0 over a two-tick
+period. An iron bot therefore advances exactly one stage per run and breaks a block in twenty ticks,
+which is upstream's number reproduced by construction rather than left to coincidence.
+
+| tier | speed | ticks per block |
+|---|---|---|
+| wood | 2.0 | 60 |
+| stone | 4.0 | 30 |
+| copper | 5.0 | 24 |
+| **iron** | **6.0** | **20 — upstream's, unchanged** |
+| diamond | 8.0 | 15 |
+| netherite | 9.0 | 14 |
+| gold | 12.0 | 10 |
+
+**Block hardness stays ignored**, as upstream ignored it. A bot tunnels at a rate set by its tools
+and not by what it is tunnelling through, so obsidian still costs what dirt costs. Bringing hardness
+in would change the agent's whole character and is not in scope.
+
+### Wood is the floor for tools
+
+An empty hand scores 1.0 against everything, which is 120 ticks a block — six times upstream's
+twenty, as the consequence of skipping an argument. `none` still parses in the tools slot because it
+is the chain's filler word, and it resolves to wood. The clamp lives in `Bot.setToolTier` so no
+caller can route around it, with `EquipmentTier.asToolTier()` as its single definition so the clamp
+and the message an operator reads cannot disagree.
 
 ### `/tplus tools <tier>`
 
@@ -322,6 +362,9 @@ Appended to Plan B's numbered list, which every plan extends, continuing from 21
   count omitted no longer parses.
 - Tools are per-bot and tiered. Upstream's `LegacyItems` was one hardcoded iron set; the default is
   still that set.
+- Break progress is the held tool's destroy speed, where upstream advanced one fixed stage per run
+  and every block took twenty ticks. Iron still takes twenty. Hardness is still ignored.
+- The tools slot floors at wood, so there is no bare-handed tier.
 - `/tplus tools` is new. Upstream had no equivalent.
 - `TargetGoal.ENTITY` is a new constant on an enum otherwise ported verbatim from
   `EnumTargetGoal`.
