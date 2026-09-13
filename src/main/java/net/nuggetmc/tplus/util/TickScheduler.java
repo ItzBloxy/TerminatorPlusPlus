@@ -51,6 +51,11 @@ public final class TickScheduler {
         cancelled.add(id);
     }
 
+    /** Whether {@link #cancel(int)} has been called for {@code id}. */
+    public boolean isCancelled(int id) {
+        return cancelled.contains(id);
+    }
+
     /**
      * Schedules {@code action} to run every {@code periodTicks}, starting one period from now.
      *

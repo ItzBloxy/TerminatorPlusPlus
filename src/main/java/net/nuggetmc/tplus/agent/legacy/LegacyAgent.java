@@ -19,6 +19,7 @@ import net.minecraft.world.phys.Vec3;
 import net.nuggetmc.tplus.agent.Agent;
 import net.nuggetmc.tplus.agent.AgentState;
 import net.nuggetmc.tplus.bot.Bot;
+import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotRegistry;
 import net.nuggetmc.tplus.event.BotDamageByPlayerEvent;
 import net.nuggetmc.tplus.event.BotDeathEvent;
@@ -65,6 +66,34 @@ public final class LegacyAgent extends Agent {
 
     public Targeting targeting() {
         return targeting;
+    }
+
+    /**
+     * Cancels every task, then clears the crack overlays those tasks were drawing.
+     *
+     * <p>Ported from upstream's override, which this port was missing until a review of phase 6.
+     * Two things went wrong without it. Clients kept a cracked texture on every block that was
+     * mid-break until the chunk reloaded, because the packet that clears one is only ever sent
+     * by the task that drew it. And, worse, the entry stayed in {@code crackList} — which
+     * {@link Mining#blockBreakEffect} reads as "some bot is already mining this" — so every
+     * block interrupted by a reset became permanently unmineable.
+     *
+     * <p>The packets need a bot to reach the server through and there may be none left, but the
+     * maps are cleared either way: the stale entry is the more damaging half, and
+     * {@code BotRegistry.reset} calls this before it removes anything.
+     */
+    @Override
+    public void stopAllTasks() {
+        super.stopAllTasks();
+
+        Bot source = registry == null ? null : registry.bots().stream().findAny().orElse(null);
+
+        if (source != null) {
+            state.crackList.forEach((ref, id) -> BotFactory.broadcastCrack(source, id, ref.pos(), -1));
+        }
+
+        state.crackList.clear();
+        state.mining.clear();
     }
 
     @Override

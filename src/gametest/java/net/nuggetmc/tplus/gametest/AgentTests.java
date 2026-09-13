@@ -570,6 +570,65 @@ public final class AgentTests {
 
     @GameTest(timeoutTicks = 400)
     @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("stopping_the_agent_frees_the_block_it_was_mining")
+    static void stopping_the_agent_frees_the_block_it_was_mining(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        BlockPos head = new BlockPos(6, 2, 7);
+        helper.setBlock(head, Blocks.STONE);
+
+        settle(registry, 5);
+        run(registry, 10);
+
+        helper.assertTrue(!registry.state().crackList.isEmpty(), "a break must be under way");
+
+        // LegacyAgent overrides stopAllTasks to clear the overlays the cancelled tasks were
+        // drawing. Without that override the crackList entry survives its task, and
+        // blockBreakEffect reads a surviving entry as "some bot is already mining this" -- so
+        // the block below would never break again, however long the bot stood there.
+        registry.agent().stopAllTasks();
+
+        helper.assertTrue(registry.state().crackList.isEmpty(), "the crack list must be cleared");
+        helper.assertTrue(registry.state().mining.isEmpty(), "and the progress map with it");
+
+        run(registry, 45);
+        helper.assertBlockPresent(Blocks.AIR, head);
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("removing_a_bot_cancels_its_swing_animation")
+    static void removing_a_bot_cancels_its_swing_animation(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+        spawn(helper, registry, new BlockPos(10, 1, 7), "Quarry");
+
+        helper.setBlock(new BlockPos(6, 2, 7), Blocks.BEDROCK);
+        settle(registry, 5);
+        run(registry, 10);
+
+        Integer anim = registry.state().miningAnim.get(bot);
+        helper.assertTrue(anim != null, "the bot must be swinging before it is removed");
+
+        // The id has to be read before remove(), because remove() is what drops it. That is the
+        // whole point: forgetting the entry without cancelling first leaves a repeating task
+        // punching a removed bot forever.
+        registry.remove(bot);
+
+        helper.assertTrue(registry.scheduler().isCancelled(anim),
+                "removing a mining bot must cancel its animation, not just forget the id");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
     @TestHolder("bedrock_is_never_broken")
     static void bedrock_is_never_broken(ExtendedGameTestHelper helper) {
         BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);

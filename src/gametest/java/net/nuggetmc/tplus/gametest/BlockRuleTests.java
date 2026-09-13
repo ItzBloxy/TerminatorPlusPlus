@@ -267,7 +267,21 @@ public final class BlockRuleTests {
         helper.assertTrue(BlockRules.isInstantBreak(Blocks.WHEAT.defaultBlockState()), "wheat crop");
         helper.assertTrue(BlockRules.isInstantBreak(Blocks.BEETROOTS.defaultBlockState()), "beetroot crop");
 
+        // The half of upstream's set that is easy to leave behind, because none of it looks like
+        // a plant. These are the blocks a bot actually meets indoors, and the difference between
+        // instant and not is two ticks against twenty per block.
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.TORCH.defaultBlockState()), "torch");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.WALL_TORCH.defaultBlockState()), "wall torch");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.REDSTONE_WIRE.defaultBlockState()), "redstone");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.REPEATER.defaultBlockState()), "repeater");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.DANDELION.defaultBlockState()), "dandelion");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.SWEET_BERRY_BUSH.defaultBlockState()), "berry bush");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.TNT.defaultBlockState()), "tnt");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.SCAFFOLDING.defaultBlockState()), "scaffolding");
+        helper.assertTrue(BlockRules.isInstantBreak(Blocks.POTTED_CACTUS.defaultBlockState()), "potted cactus");
+
         helper.assertFalse(BlockRules.isInstantBreak(Blocks.STONE.defaultBlockState()), "stone");
+        helper.assertFalse(BlockRules.isInstantBreak(Blocks.OAK_LOG.defaultBlockState()), "oak log");
 
         helper.succeed();
     }
@@ -607,6 +621,16 @@ public final class BlockRuleTests {
                 "water overhead must count as not above ground");
         helper.assertTrue(BlockRules.isAir(Blocks.WATER.defaultBlockState()),
                 "even though water is in the AIR set");
+
+        // Strict also rules out BlockState.isAir(), which cave air and void air both satisfy.
+        // Upstream compared against the single Material, so a bot in a carved cave is not above
+        // ground and keeps towering toward a distant target.
+        helper.setBlock(new BlockPos(1, 8, 1), Blocks.CAVE_AIR);
+
+        helper.assertFalse(LevelRules.aboveGround(helper.getLevel(), Vec3.atBottomCenterOf(open)),
+                "cave air overhead must count as not above ground either");
+        helper.assertTrue(Blocks.CAVE_AIR.defaultBlockState().isAir(),
+                "even though the block state calls itself air");
 
         helper.succeed();
     }

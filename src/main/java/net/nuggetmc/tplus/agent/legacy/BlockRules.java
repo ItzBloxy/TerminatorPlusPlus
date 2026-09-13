@@ -129,6 +129,10 @@ public final class BlockRules {
      *
      * <p>Upstream's NONSOLID set, with its comment: "We exclude blocks that cannot exist without
      * a solid block below (such as rails or crops)".
+     *
+     * <p>One entry is translated rather than copied, the same way {@link #INSTANT_BREAK_BLOCKS}
+     * translates two: upstream listed {@code Material.STRING}, which is the <b>item</b>. The
+     * placed block is {@code TRIPWIRE}, so no block ever matched that entry.
      */
     private static final Set<Block> NONSOLID_BLOCKS = Set.of(
             Blocks.COBWEB,
@@ -145,10 +149,18 @@ public final class BlockRules {
     /**
      * Blocks that break in one hit, so the mining loop destroys them without cracking.
      *
-     * <p>One deviation from upstream, and the only one in this file. Upstream listed
-     * {@code WHEAT_SEEDS} and {@code BEETROOT_SEEDS}, which are <b>items</b> — no block ever
-     * matched them, so those two entries were dead. The planted blocks are {@code WHEAT} and
-     * {@code BEETROOTS}, which is what this uses.
+     * <p>All 66 of upstream's, which matters more than it looks: torches, redstone, flowers, TNT
+     * and scaffolding are in here, and they are the difference between a bot clearing a lit
+     * corridor in two ticks and taking twenty per torch. An earlier draft of this port carried
+     * eleven of them and a review caught it.
+     *
+     * <p>Two entries are translated rather than copied. Upstream listed {@code WHEAT_SEEDS} and
+     * {@code BEETROOT_SEEDS}, which are <b>items</b> — no block ever matched them, so those two
+     * entries were dead. The planted blocks are {@code WHEAT} and {@code BEETROOTS}.
+     *
+     * <p>{@code FLOWER_POT} and the {@code POTTED_*} family are deliberately absent: the
+     * {@code FLOWER_POTS} tag in {@link #isInstantBreak} covers both, as the saplings and corals
+     * tags cover upstream's other pattern rules.
      */
     private static final Set<Block> INSTANT_BREAK_BLOCKS = Set.of(
             Blocks.TALL_GRASS, Blocks.SHORT_GRASS,
@@ -156,6 +168,26 @@ public final class BlockRules {
             Blocks.KELP_PLANT,
             Blocks.DEAD_BUSH,
             Blocks.WHEAT, Blocks.POTATOES, Blocks.CARROTS, Blocks.BEETROOTS,
+            Blocks.PUMPKIN_STEM, Blocks.MELON_STEM,
+            Blocks.SUGAR_CANE, Blocks.SWEET_BERRY_BUSH, Blocks.LILY_PAD,
+            Blocks.NETHER_WART, Blocks.SPORE_BLOSSOM,
+            Blocks.DANDELION, Blocks.POPPY, Blocks.BLUE_ORCHID, Blocks.ALLIUM,
+            Blocks.AZURE_BLUET, Blocks.OXEYE_DAISY, Blocks.CORNFLOWER,
+            Blocks.LILY_OF_THE_VALLEY, Blocks.WITHER_ROSE,
+            Blocks.RED_TULIP, Blocks.ORANGE_TULIP, Blocks.WHITE_TULIP, Blocks.PINK_TULIP,
+            Blocks.SUNFLOWER, Blocks.LILAC, Blocks.ROSE_BUSH, Blocks.PEONY,
+            Blocks.AZALEA, Blocks.FLOWERING_AZALEA,
+            Blocks.RED_MUSHROOM, Blocks.BROWN_MUSHROOM,
+            Blocks.CRIMSON_FUNGUS, Blocks.WARPED_FUNGUS,
+            Blocks.CRIMSON_ROOTS, Blocks.WARPED_ROOTS, Blocks.HANGING_ROOTS,
+            Blocks.WEEPING_VINES, Blocks.WEEPING_VINES_PLANT,
+            Blocks.TWISTING_VINES, Blocks.TWISTING_VINES_PLANT,
+            Blocks.CAVE_VINES, Blocks.CAVE_VINES_PLANT,
+            Blocks.REPEATER, Blocks.COMPARATOR, Blocks.REDSTONE_WIRE,
+            Blocks.REDSTONE_TORCH, Blocks.REDSTONE_WALL_TORCH,
+            Blocks.TORCH, Blocks.WALL_TORCH, Blocks.SOUL_TORCH, Blocks.SOUL_WALL_TORCH,
+            Blocks.TRIPWIRE, Blocks.TRIPWIRE_HOOK,
+            Blocks.SCAFFOLDING, Blocks.SLIME_BLOCK, Blocks.HONEY_BLOCK, Blocks.TNT,
             Blocks.SEA_PICKLE);
 
     /** Blocks upstream's {@code canStandOn} listed individually, rather than by name pattern. */
@@ -286,9 +318,12 @@ public final class BlockRules {
     /**
      * Solidity, as upstream meant it.
      *
-     * <p>Upstream was {@code mat.isSolid() || SOLID_MATERIALS.contains(mat)}, and
-     * {@code SOLID_MATERIALS} is declared and never populated anywhere on {@code master} —
-     * check with {@code git grep SOLID_MATERIALS}. So this is just the vanilla predicate.
+     * <p>Upstream was {@code mat.isSolid() || SOLID_MATERIALS.contains(mat)}, where
+     * {@code SOLID_MATERIALS} starts empty and is filled at runtime by {@code /bot environment},
+     * whose whole purpose is letting an operator declare a modded block solid so that bots treat
+     * it as an obstacle. That command is Task 25; when it lands it needs a mutable set behind
+     * this predicate, and this is where it goes. Until then the set is always empty, and an
+     * empty set makes this exactly upstream's predicate.
      */
     public static boolean isSolid(BlockState state) {
         return state.isSolid();
@@ -298,10 +333,13 @@ public final class BlockRules {
      * Non-solid blocks that still hold an entity up.
      *
      * <p>Ported from {@code canStandOn}. Upstream's name patterns become tags where one exists:
-     * {@code endsWith("_CARPET")} is {@code WOOL_CARPETS}, {@code startsWith("POTTED_")} is
-     * {@code FLOWER_POTS}, {@code data == Candle.class} is {@code CANDLES}. Heads and skulls have
-     * no tag, so they are a class test — and {@code PISTON_HEAD} is excluded by name, exactly as
-     * upstream did, because it matches {@code _HEAD} but is not footing.
+     * {@code startsWith("POTTED_")} is {@code FLOWER_POTS} and {@code data == Candle.class} is
+     * {@code CANDLES}. Heads and skulls have no tag, so they are a class test — and
+     * {@code PISTON_HEAD} is excluded by name, exactly as upstream did, because it matches
+     * {@code _HEAD} but is not footing.
+     *
+     * <p>{@code endsWith("_CARPET")} is <b>not</b> {@code WOOL_CARPETS}: the moss carpets end in
+     * the same seven letters and are not wool, so they are named alongside the tag.
      */
     public static boolean canStandOn(BlockState state) {
         Block block = state.getBlock();
@@ -312,6 +350,7 @@ public final class BlockRules {
 
         return STANDABLE.contains(block)
                 || state.is(BlockTags.WOOL_CARPETS)
+                || block == Blocks.MOSS_CARPET || block == Blocks.PALE_MOSS_CARPET
                 || state.is(BlockTags.FLOWER_POTS)
                 || state.is(BlockTags.CANDLES)
                 || block instanceof SkullBlock

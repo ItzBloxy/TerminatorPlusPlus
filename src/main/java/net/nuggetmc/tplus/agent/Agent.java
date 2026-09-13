@@ -90,9 +90,23 @@ public abstract class Agent {
             return -1;
         }
 
-        int id = registry.scheduler().runLater(delayTicks, action);
-        taskList.add(id);
-        return id;
+        // A one-element array because the id is only known once runLater has returned, and the
+        // action needs it to drop itself. Without that, taskList only ever grows: a bot mining
+        // sideways schedules one of these every tick it is blocked, and upstream's set had the
+        // same flaw over a smaller set of call sites, since only some of its 27 delayed calls
+        // were registered at all.
+        int[] id = new int[1];
+
+        id[0] = registry.scheduler().runLater(delayTicks, () -> {
+            try {
+                action.run();
+            } finally {
+                taskList.remove(id[0]);
+            }
+        });
+
+        taskList.add(id[0]);
+        return id[0];
     }
 
     /** Schedules a repeating {@code action} and remembers the id. */

@@ -2,6 +2,7 @@ package net.nuggetmc.tplus.agent.legacy;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -21,12 +22,18 @@ public final class LevelRules {
      * against {@code Material.AIR} here and against its AIR <i>set</i> elsewhere, so a bot under
      * water is not "above ground". Kept, and pinned by a test, because unifying the two looks
      * like tidying and would change when a bot gives up on a distant target.
+     *
+     * <p>Strict also means {@code Blocks.AIR} by identity rather than {@code BlockState.isAir()},
+     * which is equally true of cave air and void air. Upstream compared against the one
+     * {@code Material}, so a bot in a carved cave — every block above it {@code CAVE_AIR} — is
+     * not above ground, and keeps towering toward a distant target rather than giving up. An
+     * earlier draft used {@code isAir()} and a review caught it.
      */
     public static boolean aboveGround(ServerLevel level, Vec3 pos) {
         BlockPos base = BlockPos.containing(pos);
 
         for (int y = 1; y < 25; y++) {
-            if (!level.getBlockState(base.above(y)).isAir()) {
+            if (level.getBlockState(base.above(y)).getBlock() != Blocks.AIR) {
                 return false;
             }
         }

@@ -109,6 +109,17 @@ public final class BotRegistry {
     public void remove(Bot bot) {
         bots.remove(bot);
         failures.remove(bot);
+
+        // Cancel before forgetting. The swing animation is a repeating task and miningAnim holds
+        // the only handle to it, so dropping the entry first leaves it punching a removed bot
+        // every four ticks until the agent is disabled. Upstream leaked the same task but had no
+        // forget() to lose the handle in.
+        Integer anim = state.miningAnim.get(bot);
+
+        if (anim != null) {
+            agent.cancel(anim);
+        }
+
         state.forget(bot);
     }
 
