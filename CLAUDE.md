@@ -14,6 +14,12 @@ Renaming any of those means touching the access transformer, the gametest namesp
 and every operator's muscle memory, for no functional gain — so it has not been done, and
 `mod_name` in `gradle.properties` carries the new name alone.
 
+**Two spellings, one name.** It is **Terminator++** wherever a `+` is fine: `mod_name`, the
+README, this file. Where a `+` does not belong it is **TerminatorPlusPlus**, matching the
+repository name — `rootProject.name` and the CI artifact. It is never "TerminatorPlus++",
+which reads as three pluses. A plain `TerminatorPlus` left in the tree is either upstream's
+plugin or this mod's main class, and neither of those changes.
+
 **Fidelity is the point.** Method bodies are translated, not redesigned. Where upstream is odd, the
 port is odd in the same way and says so in a comment. Every deliberate divergence is in the
 deviation register (see *Docs* below) — if you change behaviour, add an entry.
@@ -78,7 +84,7 @@ This is the most useful thing in this file. Each tier catches a class of defect 
 | GameTests (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or a real server runtime |
 | `runServer` + RCON | Server-runtime crashes, command trees | Anything visual |
 | **A real client** | Rendering, skins, projectile collision, packet ordering | — |
-| Diffing against `master` | Silent behaviour drift | — |
+| Diffing against `paper-original` | Silent behaviour drift | — |
 
 Empirically: `runServer` found a fatal `ConfigSync` crash that 51 GameTests passed over, and a
 manual client session found **four** bugs invisible to 132 GameTests *and* to RCON — bots spawning

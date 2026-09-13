@@ -17,19 +17,19 @@ body:
     validations:
       required: true
   - type: input
-    id: plugin-version
+    id: mod-version
     attributes:
-      label: Plugin Version
-      description: What version of this plugin is your server running? Run the `/terminatorplus` command on your server.
-      placeholder: 3.0-BETA
+      label: Mod Version
+      description: Shown in the server startup log and the mods list. The jar filename has it too.
+      placeholder: 5.0.0-ALPHA
     validations:
       required: true
   - type: input
     id: server-version
     attributes:
       label: Server Version
-      description: What software version is your server running?
-      placeholder: Spigot 1.16.5
+      description: The loader and Minecraft version. This mod is server-side, so the client version rarely matters.
+      placeholder: NeoForge 26.2.0.87 on Minecraft 26.2
     validations:
       required: true
   - type: textarea
