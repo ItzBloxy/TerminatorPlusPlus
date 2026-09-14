@@ -58,6 +58,22 @@ public abstract class Agent {
         return enabled;
     }
 
+    /** Every live bot, or nothing when this agent has no registry (unit tests, {@link #noop}). */
+    public Iterable<Bot> registryBots() {
+        return registry == null ? java.util.List.of() : registry.bots();
+    }
+
+    /**
+     * Forgets one bot's agent-held state.
+     *
+     * <p>Called from {@code BotRegistry.remove} beside {@code AgentState.forget}, for state that
+     * deliberately does <b>not</b> live in {@code AgentState} — the backlog asks for those twelve
+     * collections to be narrowed rather than grown, and new state is the easy case, since nothing
+     * outside its owner reads it. {@code Archery} is the first such owner.
+     */
+    public void forgetBot(Bot bot) {
+    }
+
     public void setEnabled(boolean b) {
         enabled = b;
 

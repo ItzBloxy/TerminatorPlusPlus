@@ -121,6 +121,11 @@ public final class BotRegistry {
         }
 
         state.forget(bot);
+
+        // Agent-held per-bot state, for collaborators that deliberately do not keep theirs in
+        // AgentState. Archery is the first; the backlog asks for that narrowing, and new state is
+        // the easy case, since nothing outside the owner reads it.
+        agent.forgetBot(bot);
     }
 
     /** Ported from {@code BotManagerImpl.getBot(int)}. */

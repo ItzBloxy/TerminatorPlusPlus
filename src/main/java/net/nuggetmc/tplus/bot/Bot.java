@@ -365,6 +365,23 @@ public class Bot extends ServerPlayer {
 
     // ---- pose, animation and equipment ------------------------------------
 
+    /**
+     * Points the bot at an explicit yaw and pitch, and tells clients about the yaw.
+     *
+     * <p>{@link #faceLocation(Vec3)} aims straight at a point, which is right for a melee swing
+     * and wrong for a bow: an arrow drops, so the pitch comes from a ballistic solve rather than
+     * from the direction to the target. Same packet, different source for the numbers.
+     */
+    public void lookAt(float yaw, float pitch) {
+        BotFactory.broadcast(this, new ClientboundRotateHeadPacket(this, (byte) (yaw * 256 / 360f)));
+        setRot(yaw, pitch);
+    }
+
+    /** Pushes this bot's dirty entity data to clients, as the shield path does around blocking. */
+    public void broadcastEntityData() {
+        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), getEntityData().packDirty()));
+    }
+
     /** Swings the main hand. Vanilla broadcasts the animation packet for us. */
     public void punch() {
         swing(InteractionHand.MAIN_HAND);

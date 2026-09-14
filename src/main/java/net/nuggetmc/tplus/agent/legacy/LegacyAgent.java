@@ -51,6 +51,7 @@ public final class LegacyAgent extends Agent {
     private final Mining mining;
     private final BlockScan blockScan;
     private final SurroundingScan surroundingScan;
+    private final Archery archery;
 
     /** {@link #descendRange}'s "no cap", which is upstream's behaviour. */
     public static final int DESCEND_RANGE_UNLIMITED = Integer.MAX_VALUE;
@@ -77,11 +78,24 @@ public final class LegacyAgent extends Agent {
         this.blockScan = new BlockScan(state, this);
         this.surroundingScan = new SurroundingScan(state, this, mining);
         this.behaviors = new BotBehaviors(state, this, mining);
+        // After Mining, which it stops before taking the hand, and before Navigation, which it
+        // has no relationship with -- the hold-position decision is expressed by tickBot's
+        // ordering rather than by a call between the two.
+        this.archery = new Archery(state, this, mining);
         this.navigation = new Navigation(state, this, mining, blockScan, surroundingScan, behaviors);
     }
 
     public Targeting targeting() {
         return targeting;
+    }
+
+    public Archery archery() {
+        return archery;
+    }
+
+    @Override
+    public void forgetBot(Bot bot) {
+        archery.forget(bot);
     }
 
     /**
@@ -110,6 +124,7 @@ public final class LegacyAgent extends Agent {
 
         state.crackList.clear();
         state.mining.clear();
+        archery.clear();
     }
 
     @Override
