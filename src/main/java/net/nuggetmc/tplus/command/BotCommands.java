@@ -36,6 +36,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.nuggetmc.tplus.TerminatorPlus;
+import net.nuggetmc.tplus.agent.Agent;
+import net.nuggetmc.tplus.agent.legacy.Archery;
 import net.nuggetmc.tplus.agent.legacy.BlockRules;
 import net.nuggetmc.tplus.agent.legacy.CustomListMode;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
@@ -47,6 +49,8 @@ import net.nuggetmc.tplus.bot.BotGameProfiles;
 import net.nuggetmc.tplus.bot.BotRegistry;
 import net.nuggetmc.tplus.bot.EnemyTarget;
 import net.nuggetmc.tplus.bot.EquipmentTier;
+import net.nuggetmc.tplus.bot.ranged.RangedDecision;
+import net.nuggetmc.tplus.bot.ranged.RangedOverride;
 import net.nuggetmc.tplus.motion.BotMath;
 import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.util.MojangSkins;
@@ -163,11 +167,35 @@ public final class BotCommands {
                                                         .executes(ctx -> create(ctx, 5))
                                                         .then(Commands.argument("item",
                                                                         ItemArgument.item(event.getBuildContext()))
-                                                                .executes(ctx -> create(ctx, 6)))))))));
+                                                                .executes(ctx -> create(ctx, 6))
+                                                                .then(Commands.argument("bow",
+                                                                                ItemArgument.item(event.getBuildContext()))
+                                                                        .executes(ctx -> create(ctx, 7))))))))));
 
         root.then(Commands.literal("remove")
                 .then(Commands.argument("name", StringArgumentType.string())
                         .executes(BotCommands::removeOne)));
+
+        root.then(Commands.literal("bow")
+                .then(Commands.literal("none").executes(BotCommands::clearBow))
+                .then(Commands.argument("item", ItemArgument.item(event.getBuildContext()))
+                        .executes(BotCommands::setBow)));
+
+        root.then(Commands.literal("ranged")
+                .executes(BotCommands::showRanged)
+                .then(Commands.argument("mode", StringArgumentType.word())
+                        .suggests((c, b) -> {
+                            b.suggest("auto");
+                            b.suggest("always");
+                            b.suggest("never");
+                            return b.buildFuture();
+                        })
+                        .executes(BotCommands::setRanged)));
+
+        root.then(Commands.literal("towerquota")
+                .executes(BotCommands::showTowerQuota)
+                .then(Commands.argument("bots", IntegerArgumentType.integer(0))
+                        .executes(BotCommands::setTowerQuota)));
 
         root.then(Commands.literal("goal")
                 .executes(BotCommands::showGoal)
@@ -445,10 +473,28 @@ public final class BotCommands {
                 ? ItemArgument.getItem(ctx, "item").createItemStack(1)
                 : ItemStack.EMPTY;
 
+        // Same reasoning as `item` above: built on the command thread, because the skin callback
+        // runs on a worker and ItemStack construction reads data components.
+        ItemStack bow = depth >= 7
+                ? ItemArgument.getItem(ctx, "bow").createItemStack(1)
+                : ItemStack.EMPTY;
+
+        // `/tplus create Archer 3 none none none minecraft:bow` is what an operator types, and
+        // Bot.hasBow honours it -- but at the cost of every melee hit, because the 1.8 table in
+        // ItemUtils has no bow entry and falls through to FIST = 0.25. Say so rather than letting
+        // them find out in a fight.
+        if (bow.isEmpty() && item.getItem() instanceof net.minecraft.world.item.BowItem) {
+            source.sendSuccess(() -> Component.literal(
+                    "Note: the default item is a bow, so these bots will shoot but melee for 0.25"
+                            + " damage. Pass a melee weapon as <item> and the bow as <bow> to get both.")
+                    .withStyle(ChatFormatting.YELLOW), false);
+        }
+
         ServerLevel level = source.getLevel();
         Vec3 pos = source.getPosition();
         MinecraftServer server = source.getServer();
 
+        ItemStack bowStack = bow;
         boolean inList = playerList;
         EquipmentTier armorTier = armor;
         EquipmentTier toolTier = tools;
@@ -478,6 +524,10 @@ public final class BotCommands {
                     bot.setItem(null);
                 }
 
+                if (!bowStack.isEmpty()) {
+                    bot.setBow(bowStack.copy());
+                }
+
                 if (i > 1) {
                     bot.getBotVelocity()
                             .setX(Math.random() - 0.5)
@@ -491,7 +541,9 @@ public final class BotCommands {
             source.sendSuccess(() -> Component.literal("Spawned " + count + " bot(s)"
                     + (inList ? " in the player list" : "")
                     + " with " + armorTier.id() + " armour, " + toolTier.id() + " tools"
-                    + (item.isEmpty() ? "" : " and " + item.getHoverName().getString())), true);
+                    + (item.isEmpty() ? "" : " and " + item.getHoverName().getString())
+                    + (bowStack.isEmpty() ? "" : ", carrying a "
+                            + bowStack.getHoverName().getString())), true);
         }));
 
         return count;
@@ -762,6 +814,158 @@ public final class BotCommands {
     }
 
     /**
+     * Arms every bot with a bow, in the slot rather than as the default item.
+     *
+     * <p>Mirrors {@link #give}, and is separate from it for the reason the slot exists: a bot
+     * carrying a bow as its default item melees at {@code FIST = 0.25}, because the 1.8 table in
+     * {@code ItemUtils} has no bow entry.
+     */
+    private static int setBow(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(1);
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+
+        for (Bot bot : bots) {
+            bot.setBow(stack.copy());
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Gave " + stack.getHoverName().getString() + " to " + bots.size()
+                        + " bot(s) as a stowed bow"), true);
+
+        warnIfPvpDisabled(ctx);
+        return 1;
+    }
+
+    private static int clearBow(CommandContext<CommandSourceStack> ctx) {
+        Collection<Bot> bots = TerminatorPlus.registry().bots();
+
+        for (Bot bot : bots) {
+            bot.setBow(ItemStack.EMPTY);
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Cleared the bow slot on " + bots.size() + " bot(s)"), true);
+        return 1;
+    }
+
+    private static int showRanged(CommandContext<CommandSourceStack> ctx) {
+        Archery archery = archery(ctx);
+
+        if (archery == null) {
+            return 0;
+        }
+
+        RangedOverride mode = archery.settings().override();
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Ranged combat is " + mode.name().toLowerCase(Locale.ROOT)
+                        + describeRangedMode(mode)), false);
+        return 1;
+    }
+
+    private static String describeRangedMode(RangedOverride mode) {
+        return switch (mode) {
+            case AUTO -> " — the rules decide (target_flying, tower_quota, bot_stuck).";
+            case ALWAYS -> " — bots shoot whenever the gates allow, ignoring the rules.";
+            case NEVER -> " — no bot will draw.";
+        };
+    }
+
+    private static int setRanged(CommandContext<CommandSourceStack> ctx) {
+        Archery archery = archery(ctx);
+
+        if (archery == null) {
+            return 0;
+        }
+
+        String word = StringArgumentType.getString(ctx, "mode");
+        RangedOverride mode;
+
+        try {
+            mode = RangedOverride.valueOf(word.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "'" + word + "' must be 'auto', 'always' or 'never'"));
+            return 0;
+        }
+
+        archery.setSettings(archery.settings().withOverride(mode));
+
+        // A bot may be mid-draw when this is typed, and nothing else would clear it.
+        if (mode == RangedOverride.NEVER) {
+            for (Bot bot : TerminatorPlus.registry().bots()) {
+                archery.reset(bot);
+            }
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Ranged combat set to " + mode.name().toLowerCase(Locale.ROOT)
+                        + describeRangedMode(mode)), true);
+
+        if (mode != RangedOverride.NEVER) {
+            warnIfPvpDisabled(ctx);
+        }
+
+        return 1;
+    }
+
+    private static int showTowerQuota(CommandContext<CommandSourceStack> ctx) {
+        Archery archery = archery(ctx);
+
+        if (archery == null) {
+            return 0;
+        }
+
+        int quota = archery.settings().towerQuota();
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Tower quota is " + quota + " — a bot shoots instead of towering once " + quota
+                        + " squadmate(s) near the target are already towering."), false);
+        return 1;
+    }
+
+    private static int setTowerQuota(CommandContext<CommandSourceStack> ctx) {
+        Archery archery = archery(ctx);
+
+        if (archery == null) {
+            return 0;
+        }
+
+        int quota = IntegerArgumentType.getInteger(ctx, "bots");
+        archery.setSettings(archery.settings().withTowerQuota(quota));
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Tower quota set to " + quota), true);
+        return 1;
+    }
+
+    private static @Nullable Archery archery(CommandContext<CommandSourceStack> ctx) {
+        LegacyAgent agent = legacyAgent(ctx);
+        return agent == null ? null : agent.archery();
+    }
+
+    /**
+     * Says so when the {@code pvp} gamerule would make every arrow a no-op.
+     *
+     * <p>26.2 moved {@code pvp} out of {@code server.properties} and into a gamerule. It gates
+     * player-owned arrows twice — {@code AbstractArrow.canHitEntity} passes the arrow straight
+     * through, and {@code ServerPlayer.hurtServer} refuses the damage — while the melee path
+     * calls {@code hurtServer} directly and ignores it entirely. So with pvp off, melee bots keep
+     * killing players and archer bots silently stop. That asymmetry is accepted (deviation 42);
+     * this turns the silence into a sentence.
+     */
+    private static void warnIfPvpDisabled(CommandContext<CommandSourceStack> ctx) {
+        if (ctx.getSource().getLevel().isPvpAllowed()) {
+            return;
+        }
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Warning: the 'pvp' gamerule is off in this level, so bot arrows will pass"
+                        + " straight through players. Melee is unaffected.")
+                .withStyle(ChatFormatting.YELLOW), false);
+    }
+
+    /**
      * Equips every bot with an armour tier.
      *
      * <p>Ported from {@code armor}. The four-piece loop moved to {@code EquipmentTier.equipArmor}
@@ -848,10 +1052,34 @@ public final class BotCommands {
                                 + " / " + BotMath.round1Dec(bot.getBotMaxHealth())
                         + "\n  Alive ticks: " + bot.getAliveTicks()
                         + "\n  Kills: " + bot.getKills()
+                        + "\n  Ranged: " + describeRanged(bot)
                         + "\n  In player list: " + bot.isInPlayerList()
                         + "\n  Skin: " + describeSkin(bot))
                         .withStyle(ChatFormatting.RESET)), false);
         return 1;
+    }
+
+    /**
+     * A bot's ranged mode and the reason for it.
+     *
+     * <p>This line is the entire reason {@code RangedDecision} names a rule rather than returning
+     * a score: "why is this bot not shooting?" is the question an operator actually asks, and a
+     * scored decision cannot answer it.
+     */
+    private static String describeRanged(Bot bot) {
+        Agent agent = bot.agent();
+
+        if (!(agent instanceof LegacyAgent legacy)) {
+            return "n/a";
+        }
+
+        RangedDecision decision = legacy.archery().lastDecision(bot);
+
+        if (decision == null) {
+            return bot.hasBow() ? "armed, no decision yet" : "no bow";
+        }
+
+        return decision.mode() + " (" + decision.reason().label() + ")";
     }
 
     /**
