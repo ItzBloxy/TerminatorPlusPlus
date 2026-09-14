@@ -3,7 +3,7 @@ package net.nuggetmc.tplus.agent.legacy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -79,7 +79,7 @@ public final class Navigation {
      * below is <b>not</b> a partial restoration of it: that branch only ran within 6 blocks of
      * the target and jumped anyway ten ticks later.
      */
-    public void move(Bot bot, LivingEntity livingTarget, Vec3 pos, Vec3 target) {
+    public void move(Bot bot, Entity livingTarget, Vec3 pos, Vec3 target) {
         MotionVec vel = MotionVec.of(target.subtract(pos)).normalize();
 
         if (bot.tickDelay(5)) {
@@ -157,7 +157,7 @@ public final class Navigation {
      * @param anim true when there is water below the bot too, in which case it also takes the
      *             swimming pose. With no water below, the impulse is flattened and scaled to 0.7.
      */
-    public void swim(Bot bot, Vec3 target, LivingEntity livingTarget, boolean anim) {
+    public void swim(Bot bot, Vec3 target, Entity livingTarget, boolean anim) {
         // Upstream opened with setSneaking(false) and nothing else. Calling bot.stand() here
         // would be wrong: stand() also clears the swim flag, so the non-anim branch below would
         // silently stop a swimming bot from swimming. setShiftKeyDown is vanilla's public
@@ -291,7 +291,7 @@ public final class Navigation {
      *
      * @return true when the bot is now towering or mining
      */
-    public boolean checkUp(Bot bot, LivingEntity livingTarget, Vec3 target,
+    public boolean checkUp(Bot bot, Entity livingTarget, Vec3 target,
                            boolean withinTargetXZ, boolean sameXZ) {
         ServerLevel level = (ServerLevel) bot.level();
         Vec3 pos = bot.position();
@@ -358,7 +358,7 @@ public final class Navigation {
      * spot, and reading its position again inside the lambda would build the pillar one block
      * too high.
      */
-    private boolean tower(Bot bot, LivingEntity livingTarget, Vec3 target, BlockPos feet,
+    private boolean tower(Bot bot, Entity livingTarget, Vec3 target, BlockPos feet,
                           BlockState m0, boolean withinTargetXZ) {
         Vec3 pos = bot.position();
 
@@ -464,7 +464,7 @@ public final class Navigation {
      * stays long: the two spellings stop meaning the same thing the moment a constant is added
      * to {@link ScanOffset}.
      */
-    public byte checkSide(Bot bot, LivingEntity target) {
+    public byte checkSide(Bot bot, Entity target) {
         ServerLevel level = (ServerLevel) bot.level();
 
         Vec3 a = bot.getEyePosition();

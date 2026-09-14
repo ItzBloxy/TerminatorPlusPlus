@@ -7,7 +7,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -295,7 +295,7 @@ public final class BlockScan {
      * stops it turning away mid-placement and walking off its own block. These two windows are
      * the only writers of either set.
      */
-    public void clutch(Bot bot, LivingEntity target) {
+    public void clutch(Bot bot, Entity target) {
         ServerLevel level = (ServerLevel) bot.level();
         BlockPos botPos = BlockPos.containing(bot.position());
 

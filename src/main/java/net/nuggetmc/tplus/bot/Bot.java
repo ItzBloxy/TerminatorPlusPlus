@@ -21,7 +21,6 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
@@ -479,7 +478,7 @@ public class Bot extends ServerPlayer {
      * <p>Ported from {@code Bot.attack}. The damage comes from {@link ItemUtils}, not from the
      * item's real attack-damage attribute — see that class for why.
      */
-    public void attack(LivingEntity target) {
+    public void attack(Entity target) {
         faceLocation(target.position());
         punch();
 

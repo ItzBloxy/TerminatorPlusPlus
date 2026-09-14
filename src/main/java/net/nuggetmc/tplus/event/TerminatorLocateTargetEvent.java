@@ -1,6 +1,6 @@
 package net.nuggetmc.tplus.event;
 
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.neoforged.bus.api.Event;
 import net.neoforged.bus.api.ICancellableEvent;
 import net.nuggetmc.tplus.bot.Bot;
@@ -24,15 +24,21 @@ import org.jetbrains.annotations.Nullable;
  * <p>Upstream's accessor was {@code getTerminator()}. Renamed to {@code getBot()} to match every
  * other event here and the concrete type the v1 agent works against (spec §4.4).
  *
+ * <p>The target is an {@code Entity}, not the {@code LivingEntity} upstream's Bukkit event
+ * carried. Bots can target end crystals, boats and item frames, none of which are living — see
+ * deviation 36. A handler that only ever calls {@code setTarget} is unaffected, because a
+ * {@code LivingEntity} still satisfies an {@code Entity} parameter; one that assigns
+ * {@code getTarget()} to a {@code LivingEntity} is the case that has to change.
+ *
  * <p>{@code ICancellableEvent} supplies {@code isCanceled}/{@code setCanceled} as interface
  * defaults — note the American spelling, which differs from the four plain event classes.
  */
 public final class TerminatorLocateTargetEvent extends Event implements ICancellableEvent {
 
     private final Bot bot;
-    private @Nullable LivingEntity target;
+    private @Nullable Entity target;
 
-    public TerminatorLocateTargetEvent(Bot bot, @Nullable LivingEntity target) {
+    public TerminatorLocateTargetEvent(Bot bot, @Nullable Entity target) {
         this.bot = bot;
         this.target = target;
     }
@@ -41,11 +47,11 @@ public final class TerminatorLocateTargetEvent extends Event implements ICancell
         return bot;
     }
 
-    public @Nullable LivingEntity getTarget() {
+    public @Nullable Entity getTarget() {
         return target;
     }
 
-    public void setTarget(@Nullable LivingEntity target) {
+    public void setTarget(@Nullable Entity target) {
         this.target = target;
     }
 }

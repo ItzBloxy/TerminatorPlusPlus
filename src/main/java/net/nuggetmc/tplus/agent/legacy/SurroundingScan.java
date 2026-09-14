@@ -3,7 +3,7 @@ package net.nuggetmc.tplus.agent.legacy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -45,7 +45,7 @@ public final class SurroundingScan {
      *
      * @return the offset naming what is being broken, or null when nothing is in the way
      */
-    public @Nullable ScanOffset checkNearby(Bot bot, LivingEntity target) {
+    public @Nullable ScanOffset checkNearby(Bot bot, Entity target) {
         ServerLevel level = (ServerLevel) bot.level();
 
         // Note the order: the bot turns to face its target first, and every "direction" below is

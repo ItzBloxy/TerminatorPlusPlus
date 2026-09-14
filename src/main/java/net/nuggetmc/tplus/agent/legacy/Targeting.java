@@ -3,6 +3,7 @@ package net.nuggetmc.tplus.agent.legacy;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
@@ -101,7 +102,7 @@ public final class Targeting {
         return regionWeightZ;
     }
 
-    public @Nullable LivingEntity locateTarget(Bot bot, Vec3 pos) {
+    public @Nullable Entity locateTarget(Bot bot, Vec3 pos) {
         return locateTarget(bot, pos, goal);
     }
 
@@ -112,10 +113,10 @@ public final class Targeting {
      * set and keeps whichever passes {@link #validateCloserEntity}, and the event is posted once
      * at the end even when nothing was found.
      */
-    public @Nullable LivingEntity locateTarget(Bot bot, Vec3 pos, TargetGoal g) {
+    public @Nullable Entity locateTarget(Bot bot, Vec3 pos, TargetGoal g) {
         ServerLevel level = (ServerLevel) bot.level();
         MinecraftServer server = level.getServer();
-        LivingEntity result = null;
+        Entity result = null;
 
         switch (g) {
             case NONE:
@@ -291,8 +292,8 @@ public final class Targeting {
      * {@code (a + regionA) < (b) + regionB}, which is the same arithmetic and is left as-is so
      * a diff against {@code master} stays clean.
      */
-    private boolean validateCloserEntity(Bot bot, LivingEntity entity, Vec3 pos,
-                                         @Nullable LivingEntity incumbent) {
+    private boolean validateCloserEntity(Bot bot, Entity entity, Vec3 pos,
+                                         @Nullable Entity incumbent) {
         double regionDistEntity = weightedRegionDist(region, entity.position(),
                 regionWeightX, regionWeightY, regionWeightZ);
 

@@ -7,7 +7,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -128,7 +128,7 @@ public final class LegacyAgent extends Agent {
 
         ServerLevel level = (ServerLevel) bot.level();
         Vec3 pos = bot.position();
-        LivingEntity livingTarget = targeting.locateTarget(bot, pos);
+        Entity livingTarget = targeting.locateTarget(bot, pos);
 
         // Before the no-target return, which is upstream's order and easy to get wrong: a
         // falling bot saves itself whether or not it has anything to chase.
@@ -299,7 +299,7 @@ public final class LegacyAgent extends Agent {
      * blocks or further away is skipped. {@code invulnerableTime} is the vanilla field behind
      * Bukkit's {@code getNoDamageTicks}.
      */
-    private void attack(Bot bot, LivingEntity target, Vec3 pos) {
+    private void attack(Bot bot, Entity target, Vec3 pos) {
         boolean invincible = target instanceof ServerPlayer player
                 && PlayerUtils.isInvincible(player.gameMode());
 

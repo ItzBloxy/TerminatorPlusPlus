@@ -1,8 +1,8 @@
 package net.nuggetmc.tplus.gametest;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.level.GameType;
@@ -67,7 +67,7 @@ public final class EnemyTargetTests {
         return bot;
     }
 
-    private static LivingEntity locate(BotRegistry registry, Bot bot) {
+    private static Entity locate(BotRegistry registry, Bot bot) {
         return ((LegacyAgent) registry.agent()).targeting().locateTarget(bot, bot.position());
     }
 
@@ -101,7 +101,7 @@ public final class EnemyTargetTests {
 
         bot.setEnemyTarget(EnemyTarget.ofTypes(Set.of(EntityTypes.ZOMBIE), "minecraft:zombie"));
 
-        LivingEntity found = locate(registry, bot);
+        Entity found = locate(registry, bot);
 
         helper.assertTrue(found == zombie, "the further zombie must beat the nearer cow");
         helper.assertFalse(found == cow, "a cow is not a zombie");
@@ -124,7 +124,7 @@ public final class EnemyTargetTests {
         // zombie target would pick `near`.
         bot.setEnemyTarget(EnemyTarget.ofEntities(Set.of(far.getUUID()), "1 entities (zombie)"));
 
-        LivingEntity found = locate(registry, bot);
+        Entity found = locate(registry, bot);
 
         helper.assertTrue(found == far, "a specific target must find the entity it names");
         helper.assertFalse(found == near, "and not a nearer one of the same type");
@@ -172,7 +172,7 @@ public final class EnemyTargetTests {
         // bots and absurd for this one.
         hunter.setEnemyTarget(EnemyTarget.ofTypes(Set.of(EntityTypes.PLAYER), "minecraft:player"));
 
-        LivingEntity found = locate(registry, hunter);
+        Entity found = locate(registry, hunter);
 
         helper.assertTrue(found != null, "the scan must find some player -- the rival at worst");
         helper.assertFalse(found == hunter, "but never the hunter itself");

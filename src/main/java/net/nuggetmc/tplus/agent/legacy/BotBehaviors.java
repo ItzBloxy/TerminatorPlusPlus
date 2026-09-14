@@ -7,7 +7,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.vehicle.boat.Boat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -50,7 +50,7 @@ public final class BotBehaviors {
      * statement here"), the early return for a bot on boat cooldown leaves the boat in its hand,
      * and {@code setItem(null)} means "restore the default item", not "empty".
      */
-    public void resetHand(Bot bot, LivingEntity target) {
+    public void resetHand(Bot bot, Entity target) {
         if (!state.noFace.contains(bot)) {
             bot.faceLocation(target.position());
         }
@@ -76,7 +76,7 @@ public final class BotBehaviors {
      * <p>The Nether is the axis every hazard branch turns on, because water cannot be placed
      * there: lava gets cobblestone instead, and fire gets punched out.
      */
-    public void miscellaneousChecks(Bot bot, LivingEntity target) {
+    public void miscellaneousChecks(Bot bot, Entity target) {
         ServerLevel level = (ServerLevel) bot.level();
         Vec3 pos = bot.position();
         BlockPos at = BlockPos.containing(pos);
@@ -172,7 +172,7 @@ public final class BotBehaviors {
      * something to stand on. The {@code miningAnim} test is what stops it doing this while it is
      * busy breaking a block.
      */
-    private void waterMlg(Bot bot, LivingEntity target, ServerLevel level, Vec3 pos,
+    private void waterMlg(Bot bot, Entity target, ServerLevel level, Vec3 pos,
                           BlockPos under, BlockPos under2) {
         if (BotMath.floorY(pos) > BotMath.floorY(target.position()) + 1
                 || state.miningAnim.containsKey(bot)
@@ -201,7 +201,7 @@ public final class BotBehaviors {
      * <p>26.2 split boats per wood and moved the constants to {@code EntityTypes}; oak matches
      * the {@code OAK_BOAT} item upstream put in the bot's hand.
      */
-    private void boatOverLava(Bot bot, LivingEntity target, ServerLevel level, Vec3 pos) {
+    private void boatOverLava(Bot bot, Entity target, ServerLevel level, Vec3 pos) {
         if (state.boatCooldown.contains(bot)) {
             return;
         }
