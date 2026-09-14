@@ -8,6 +8,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -307,7 +308,20 @@ public final class LegacyAgent extends Agent {
             return;
         }
 
-        bot.attack(target);
+        // The dragon is a Mob, so the scan finds it and all three gates above measure against it,
+        // which is right: it is what validateCloserEntity compared and what navigation aims at.
+        // Only the recipient of the hit moves.
+        //
+        // EnderDragon.hurtServer routes to `hurt(level, this.body, ...)`, and that method opens
+        // `if (part != this.head) damage = damage / 4 + min(damage, 1)`. A hit worth 8 lands as 3.
+        // Vanilla makes players aim at a part -- EnderDragon.isPickable() is false -- and the
+        // parts live in ServerLevel's separate dragonParts map rather than the entity index, so
+        // widening the scan cannot reach them and redirecting the hit is the only route.
+        //
+        // Upstream had the same quarter damage. Fixed rather than kept, because the symptom is
+        // invisible from outside: bots simply took three times as long and nothing said why.
+        // Deviation 37.
+        bot.attack(target instanceof EnderDragon dragon ? dragon.head : target);
     }
 
     @Override
