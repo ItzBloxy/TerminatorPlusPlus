@@ -9994,6 +9994,23 @@ the commit message. The sanctioned ones, for reference:
     measures against the aim point. `/tplus descendrange unlimited` restores upstream's
     behaviour; the second branch's own `horizontal < 10` is untouched. Designed in
     `docs/superpowers/specs/2026-09-14-descend-range-design.md`.
+34. **`move` walks instead of jumping under a low ceiling.** Upstream jumped unconditionally
+    outside its neural-network branch, and that branch's walk path was gated on `distance <= 6`,
+    sat inside the left/right strafe logic, and jumped anyway ten ticks later — a close-quarters
+    juke that never fired during a tunnel. The action here is upstream's `bot.walk(vel.setY(0))`;
+    the trigger, `!BlockRules.isAir(feet+2)`, and the dropped delayed jump are this port's. The
+    `isAir` spelling is shared with `SurroundingScan.isWalkableStep` on purpose: under a ceiling
+    that method returns false, so a knee-high block is mined rather than hopped and a walking bot
+    is never asked to climb. Scoped to low ceilings, so bots keep their hopping gait in the open
+    and in combat and `walk`'s 0.4 clamp never lands anywhere it binds.
+
+    Measured at **39.3 ticks per block against a 47.4 baseline, 17% faster** — well short of the
+    28% the design predicted, because movement costs 9.3 ticks per block rather than 3-5: `move`
+    is only reached after a block finishes breaking, so the bot gets a burst of impulses and then
+    decelerates while mining the next one, never sustaining the clamp. In a tight corridor the
+    real gain is larger than that figure suggests: a jumping bot bounces off the ceiling and
+    barely mines at all, measured at 2 blocks to walking's 17 over 700 ticks. Designed in
+    `docs/superpowers/specs/2026-09-14-walk-vs-jump-design.md`.
 35. **Mining progress uses vanilla's mining sound, not a break sound on every run.** Upstream
     played `breakBlockSound` for both progress and the break, on every run of a task that ticks
     every `BREAK_PERIOD` (2) ticks, at a flat 0.3 volume and full pitch — so a twenty-tick block

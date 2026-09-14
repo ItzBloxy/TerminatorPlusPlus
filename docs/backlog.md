@@ -87,6 +87,18 @@ The descent half of that is now bounded — `/tplus descendrange` stops a stuck 
 until it is within 8 blocks horizontally — but bounding a straight line is not the same as having
 a path. There is still no graph, no cost function and no diagonal.
 
+What a step costs is now measured, which it never was before. A bot tunnelling with netherite
+tools spent about 47 ticks per block of forward progress, of which only ~30 was mining — the rest
+was the jump arc, and `tickBot`'s decision branch sits behind `isBotOnGround()`, so that time was
+idle rather than merely slow. Bots now walk under a low ceiling instead, which measured 39.3
+ticks per block. In a tight corridor the difference is far starker than 17%: a jumping bot
+bounces off the ceiling and barely mines at all, 2 blocks against walking's 17 over 700 ticks.
+
+That is a constant-factor win on a straight line and still not a path. It also says something
+about where the remaining time goes — movement costs 9.3 ticks per block, not the 3-5 a sustained
+walk would, because `move` is only reached once a block has finished breaking. Making a bot walk
+*while* it mines is the next constant factor, and a larger change than this one was.
+
 A visualiser is therefore only interesting alongside actual pathfinding. The cheap version that
 *would* help today is rendering the current `ScanOffset` decision and the target — a debug overlay
 of "what did the scan pick this tick".
