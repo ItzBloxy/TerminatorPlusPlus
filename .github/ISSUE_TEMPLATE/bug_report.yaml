@@ -21,7 +21,7 @@ body:
     attributes:
       label: Mod Version
       description: Shown in the server startup log and the mods list. The jar filename has it too.
-      placeholder: 5.0.0-ALPHA
+      placeholder: 5.1.0-ALPHA
     validations:
       required: true
   - type: input

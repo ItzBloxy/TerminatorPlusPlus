@@ -10,7 +10,7 @@ They hunt a target, mine through walls, tower, clutch out of falls, bridge over 
 [![NeoForge](https://img.shields.io/badge/NeoForge-26.2.0.87-F16436?style=flat-square)](https://neoforged.net)
 [![Java](https://img.shields.io/badge/Java-25-E76F00?style=flat-square&logo=openjdk&logoColor=white)](https://adoptium.net)
 [![Gradle](https://img.shields.io/badge/Gradle-9.2.1-02303A?style=flat-square&logo=gradle&logoColor=white)](https://gradle.org)
-[![Version](https://img.shields.io/badge/version-5.0.0--ALPHA-DFB317?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-5.1.0--ALPHA-DFB317?style=flat-square)](#status)
 [![Licence](https://img.shields.io/badge/licence-EPL--2.0-0A7BBB?style=flat-square)](LICENSE)
 
 **Vanilla clients connect.** No modpack, no resource pack, nothing on their end.
@@ -32,7 +32,7 @@ below to be missing, and do not run it anywhere you would mind it breaking.
 <a id="status"></a>
 
 > [!WARNING]
-> **Status: 5.0.0-ALPHA.** The agent works and has been played against. The public API module and
+> **Status: 5.1.0-ALPHA.** The agent works and has been played against. The public API module and
 > the neural-network AI are not ported yet — see [What is not built yet](#what-is-not-built-yet).
 
 ## Contents
@@ -63,7 +63,8 @@ Server-side only. Clients connect with vanilla.
 | **Client** | Anything. Vanilla 26.2 is fine |
 | **Permission** | `/tplus` needs permission level 2 — operators have it by default |
 
-1. Drop `tplus-5.0.0-ALPHA.jar` into `mods/`.
+1. Download `tplus-5.1.0-ALPHA.jar` from [Releases](https://github.com/ItzBloxy/TerminatorPlusPlus/releases)
+   and drop it into `mods/`.
 2. Start the server.
 3. `/tplus` is available to operators.
 
@@ -79,7 +80,7 @@ Needs **JDK 25**. The Gradle wrapper fetches everything else.
 ./gradlew jar
 ```
 
-`build` compiles and runs the 109 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
+`build` compiles and runs the 109 unit tests; `jar` writes `build/libs/tplus-5.1.0-ALPHA.jar`.
 
 <details>
 <summary><b>The other run tasks</b></summary>
