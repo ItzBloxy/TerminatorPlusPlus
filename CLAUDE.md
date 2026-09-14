@@ -49,8 +49,8 @@ git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/
 ## Commands
 
 ```bash
-./gradlew build              # compile + 101 unit tests
-./gradlew runGameTestServer  # 146 GameTests, headless, ~10s
+./gradlew build              # compile + 109 unit tests
+./gradlew runGameTestServer  # 147 GameTests, headless, ~10s
 ./gradlew runServer          # dev server, RCON on 25575 (password in run/server.properties)
 ./gradlew runClient          # dev client — connect to localhost
 ./gradlew jar                # the production jar, build/libs/tplus-*.jar

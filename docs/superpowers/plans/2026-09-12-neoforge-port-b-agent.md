@@ -9985,6 +9985,15 @@ the commit message. The sanctioned ones, for reference:
     change the tool choice on 28 blocks — leaves, wool and cobweb — and on nothing else, because
     they score 1.0 everywhere else and the comparison is strictly greater. Designed in
     `docs/superpowers/specs/2026-09-13-shears-and-tool-coverage-design.md`.
+33. **`checkDown`'s first branch is capped on horizontal distance.** Upstream gated it on
+    `withinTargetXZ || sameXZ` and bounded it horizontally only through the first of those, so a
+    stuck bot dug down at any distance at all — `sameXZ` is `center`'s stuckness sample and says
+    nothing about how far away the target is. It now requires
+    `withinTargetXZ || (sameXZ && horizontal < descendRange)`, default 8. The cap deliberately
+    does not apply to `withinTargetXZ`, which admits bots up to 8.66 blocks out because it
+    measures against the aim point. `/tplus descendrange unlimited` restores upstream's
+    behaviour; the second branch's own `horizontal < 10` is untouched. Designed in
+    `docs/superpowers/specs/2026-09-14-descend-range-design.md`.
 
 And two things found in Plan D that are **not** deviations:
 

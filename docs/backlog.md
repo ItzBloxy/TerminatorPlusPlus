@@ -83,6 +83,10 @@ no cost function. It normalises a vector at its target, jumps, and mines whateve
 it. That is why bots prefer straight lines, and why one below you will mine straight down to your
 level and then across rather than cutting the diagonal.
 
+The descent half of that is now bounded — `/tplus descendrange` stops a stuck bot digging down
+until it is within 8 blocks horizontally — but bounding a straight line is not the same as having
+a path. There is still no graph, no cost function and no diagonal.
+
 A visualiser is therefore only interesting alongside actual pathfinding. The cheap version that
 *would* help today is rendering the current `ScanOffset` decision and the target — a debug overlay
 of "what did the scan pick this tick".

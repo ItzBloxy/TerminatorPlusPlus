@@ -79,7 +79,7 @@ Needs **JDK 25**. The Gradle wrapper fetches everything else.
 ./gradlew jar
 ```
 
-`build` compiles and runs the 101 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
+`build` compiles and runs the 109 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
 
 <details>
 <summary><b>The other run tasks</b></summary>
@@ -88,7 +88,7 @@ Needs **JDK 25**. The Gradle wrapper fetches everything else.
 
 | Task | What it does |
 |---|---|
-| `./gradlew runGameTestServer` | 143 in-world GameTests, headless |
+| `./gradlew runGameTestServer` | 147 in-world GameTests, headless |
 | `./gradlew runServer` | dev server, RCON on 25575 |
 | `./gradlew runClient` | dev client, for the things a person has to watch |
 
@@ -226,8 +226,12 @@ zero or more.
 | `/tplus agent <true\|false>` | stop or start the AI entirely | on |
 | `/tplus drops <true\|false>` | whether bots drop their gear on death | off |
 | `/tplus offsets <true\|false>` | converge on a ring around the target instead of one point | on |
+| `/tplus descendrange <blocks>` | how close, horizontally, a stuck bot must be before it tunnels down toward a target below it | 8 |
 
-Those last three require their argument — there is no report form.
+`agent`, `drops` and `offsets` require their argument — there is no report form.
+`descendrange` reports when given none, and takes `unlimited` to lift the cap entirely, which is
+what bots did before it existed: one that lost its footing fifty blocks from a target below would
+tunnel straight down to its level and then mine across.
 
 ### Managing bots
 
@@ -360,8 +364,8 @@ Each catches a class of defect the others cannot.
 | Tier | Catches | Blind to |
 |---|---|---|
 | Signature checks against the patched sources jar | Compile errors, 26.2 renames | Everything else |
-| **101 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
-| **146 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
+| **109 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
+| **147 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
 | `runServer` driven over RCON | Server-runtime crashes, command trees | Anything visual |
 | A real client | Rendering, skins, projectile collision, packet ordering | — |
 | Diffing against `paper-original` | Silent behaviour drift | — |
