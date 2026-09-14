@@ -24,6 +24,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
@@ -81,6 +82,20 @@ public class Bot extends ServerPlayer {
      * bare fists — the same 0.25 damage the Paper build gave an AIR stack.
      */
     private ItemStack defaultItem = ItemStack.EMPTY;
+
+    /**
+     * The bow a bot swaps to when {@code Archery} puts it in RANGED, kept separate from
+     * {@link #defaultItem} so a bot can carry a sword and a bow at once.
+     *
+     * <p>Not an equipment slot in the vanilla sense — nothing renders it while it is stowed. It
+     * is where the bow lives between draws, and {@code Archery} moves it into the main hand and
+     * back.
+     *
+     * <p>Empty is the normal state. {@link #hasBow()} also answers true when {@link #defaultItem}
+     * is itself a bow, which is what makes
+     * {@code /tplus create Archer 3 none none none minecraft:bow} arm a squad.
+     */
+    private ItemStack bowItem = ItemStack.EMPTY;
 
     /**
      * A fixed random point in a radius-3 horizontal circle, chosen once per bot.
@@ -387,6 +402,34 @@ public class Bot extends ServerPlayer {
 
     public void setDefaultItem(ItemStack item) {
         this.defaultItem = item;
+    }
+
+    /** Sets the stowed bow. A null or empty stack disarms the bot. */
+    public void setBow(ItemStack item) {
+        this.bowItem = item == null ? ItemStack.EMPTY : item;
+    }
+
+    /** The stowed bow itself, which is empty unless one was set. */
+    public ItemStack getBow() {
+        return bowItem;
+    }
+
+    /**
+     * Whether this bot can shoot at all.
+     *
+     * <p>Two ways to be armed, both of which an operator will use: an explicit bow in the slot,
+     * or a default item that is itself a bow. The second costs the bot its melee damage —
+     * {@code ItemUtils}' 1.8 table has no bow entry and falls through to {@code FIST = 0.25} —
+     * but refusing it outright would be worse than the fist damage, because it is the obvious
+     * thing to type.
+     */
+    public boolean hasBow() {
+        return !bowItem.isEmpty() || defaultItem.getItem() instanceof BowItem;
+    }
+
+    /** What to actually put in the hand when drawing: the slot if set, otherwise the default. */
+    public ItemStack bowStack() {
+        return bowItem.isEmpty() ? defaultItem : bowItem;
     }
 
     /** Main hand. A null {@code item} means "restore the default item". */
