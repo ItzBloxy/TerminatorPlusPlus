@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -39,6 +40,21 @@ public final class Mining {
 
     /** Ticks between runs of the break task. Upstream's, unchanged. */
     private static final int BREAK_PERIOD = 2;
+
+    /**
+     * How many runs of the break task pass between mining-progress sounds.
+     *
+     * <p>Two, which at {@value #BREAK_PERIOD} ticks a run is every four ticks — vanilla's
+     * cadence in {@code MultiPlayerGameMode.continueDestroyBlock}, where the test is
+     * {@code destroyTicks % 4.0F == 0.0F}. The task itself still runs every two ticks, because
+     * progress and the crack overlay want that; only the sound is thinned. See deviation 35.
+     *
+     * <p>Counted in <i>runs</i> rather than read off the level's game time on purpose. A
+     * GameTest drives {@code BotRegistry.tick()} in a loop inside a single server tick, so
+     * {@code level.getGameTime()} does not move and a time-based gate is always true — it would
+     * work in production and be untestable, which is how a cadence silently regresses.
+     */
+    private static final int SOUND_EVERY_N_RUNS = 2;
 
     /**
      * Break progress one crack stage costs.
@@ -230,16 +246,22 @@ public final class Mining {
                 return;
             }
 
-            // The hit sound, not the break sound. Upstream used the break sound for both, and
-            // this branch runs every BREAK_PERIOD ticks -- so a twenty-tick block stacked ten
-            // copies of a one-second shattering noise, and the only thing keeping that bearable
-            // was that bots used to spend most of a tunnel airborne rather than mining. Once
-            // they walked under low ceilings and mined continuously it became constant. Vanilla
-            // draws exactly this distinction. Deviation 35.
-            SoundEvent progressSound = LegacyUtils.hitBlockSound(target);
+            // Vanilla's mining noise, copied term for term from
+            // MultiPlayerGameMode.continueDestroyBlock: the HIT sound rather than the break
+            // sound, every four ticks rather than every two, at (volume + 1) / 8 and half
+            // pitch. Upstream played the BREAK sound on every run at a flat 0.3 and full pitch,
+            // so a twenty-tick block stacked ten copies of a one-second shattering noise. What
+            // kept that bearable was bots spending most of a tunnel airborne; once they walked
+            // under low ceilings and mined continuously it became constant. Deviation 35.
+            SoundType soundType = target.getSoundType();
 
-            if (progressSound != null) {
-                level.playSound(null, pos, progressSound, SoundSource.BLOCKS, 0.3f, 1f);
+            // progress divided by one run's worth is how many runs have already happened, so
+            // this fires on every other one without needing a counter of its own.
+            int perRun = Math.max(1, Math.round(speed * BREAK_PERIOD));
+
+            if ((progress / perRun) % SOUND_EVERY_N_RUNS == 0) {
+                level.playSound(null, pos, soundType.getHitSound(), SoundSource.BLOCKS,
+                        (soundType.getVolume() + 1f) / 8f, soundType.getPitch() * 0.5f);
             }
 
             // No store, so the task spins here forever rather than stopping. Faithfully

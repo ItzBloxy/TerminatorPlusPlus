@@ -1124,6 +1124,21 @@ public final class AgentTests {
             helper.assertTrue(spy.count(type.getBreakSound()) <= 1,
                     "the break sound belongs to the block giving way, once; heard "
                             + spy.count(type.getBreakSound()));
+
+            // Cadence: vanilla plays it every 4 ticks, so an iron bot breaking stone in 20 ticks
+            // gets about five. Upstream's every-2-ticks gave ten. The bound is loose because the
+            // task's start tick decides which side of the modulus it lands on, but it has to be
+            // nearer five than ten or the change did not take.
+            helper.assertTrue(spy.count(type.getHitSound()) <= 7,
+                    "progress sound must be every 4 ticks, not every 2; heard "
+                            + spy.count(type.getHitSound()) + " in a 20-tick break");
+
+            // Volume: vanilla's (volume + 1) / 8, which is 0.25 for stone. The break sound at
+            // full volume is louder, and it is the last thing played, so cap on the progress
+            // sounds by checking nothing quieter-than-break exceeded it.
+            helper.assertTrue(spy.loudest() <= 1.0f + 0.001f,
+                    "nothing should exceed the break sound's full volume; loudest was "
+                            + spy.loudest());
         } finally {
             NeoForge.EVENT_BUS.unregister(spy);
         }
@@ -1332,17 +1347,23 @@ final class RetargetHandler {
     }
 }
 
-/** Records every positioned sound the level plays, so a test can assert on which one. */
+/** Records every positioned sound the level plays, so a test can assert on which and how loud. */
 final class SoundSpy {
 
     private final List<SoundEvent> heard = new ArrayList<>();
+    private final List<Float> volumes = new ArrayList<>();
 
     @SubscribeEvent
     public void onSound(PlayLevelSoundEvent.AtPosition event) {
         heard.add(event.getSound().value());
+        volumes.add(event.getNewVolume());
     }
 
     int count(SoundEvent sound) {
         return (int) heard.stream().filter(s -> s == sound).count();
+    }
+
+    float loudest() {
+        return volumes.stream().reduce(0f, Math::max);
     }
 }
