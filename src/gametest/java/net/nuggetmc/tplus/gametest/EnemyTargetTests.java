@@ -5,6 +5,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.vehicle.boat.Boat;
@@ -289,6 +290,38 @@ public final class EnemyTargetTests {
 
         helper.assertFalse(locate(registry, hunter) == ghost,
                 "a spectator cannot be hit, so it must never be chosen");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "11x5x11", floor = true)
+    @TestHolder("a_generic_target_finds_the_ender_dragon")
+    static void a_generic_target_finds_the_ender_dragon(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithEntityGoal();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 5), "Hunter");
+
+        // The dragon is spawned, asked about, and discarded inside one tick. It is never ticked:
+        // a live dragon flies, breaks blocks and wants an EndDragonFight context, and these tests
+        // share a level. discard() sits in a finally so a failed assertion cannot leak one.
+        EnderDragon dragon = helper.spawn(EntityTypes.ENDER_DRAGON, new BlockPos(8, 1, 5));
+        Entity found;
+
+        try {
+            bot.setEnemyTarget(EnemyTarget.ofTypes(
+                    Set.of(EntityTypes.ENDER_DRAGON), "minecraft:ender_dragon"));
+            found = locate(registry, bot);
+        } finally {
+            dragon.discard();
+        }
+
+        // EnderDragon.isPickable() is false, which in vanilla means "aim at one of my parts", not
+        // "cannot be hit" -- every part returns true. A gate that reads it as the latter drops the
+        // dragon entirely and makes LegacyAgent's head redirect unreachable. That is exactly what
+        // shipped once, so this test exists to stop it shipping twice.
+        helper.assertTrue(found == dragon,
+                "the ender dragon must be targetable even though isPickable() is false");
 
         registry.reset();
         helper.succeed();

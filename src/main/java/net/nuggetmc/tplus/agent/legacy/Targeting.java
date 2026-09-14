@@ -14,6 +14,7 @@ import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.entity.PartEntity;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotRegistry;
 import net.nuggetmc.tplus.bot.EnemyTarget;
@@ -317,6 +318,15 @@ public final class Targeting {
      * {@code AbstractBoat.isPickable()} is {@code !isRemoved()} and
      * {@code AbstractArrow.isPickable()} is {@code super.isPickable() && !isInGround()}.
      *
+     * <p><b>{@code isPickable()} means two different things, and the multipart clause is what
+     * tells them apart.</b> On {@code Marker} or {@code Display} a {@code false} means nothing can
+     * ever hit this. On {@code EnderDragon} it means <i>aim at one of my parts instead</i> — every
+     * {@code EnderDragonPart} returns {@code true}, and that indirection is how vanilla makes a
+     * player hit a wing rather than a bounding box the size of the whole animation. Reading the
+     * dragon's {@code false} as the first meaning drops it from the goal entirely and makes
+     * {@code LegacyAgent}'s head redirect unreachable. That shipped once and
+     * {@code a_generic_target_finds_the_ender_dragon} exists so it cannot ship twice.
+     *
      * <p><b>Two vanilla entities pass this and can never be damaged, and that is known rather
      * than missed.</b> {@code PrimedTnt} and {@code Interaction} are both pickable and inherit
      * {@code isAttackable() == true}, but each declares {@code hurtServer} {@code final}
@@ -329,7 +339,40 @@ public final class Targeting {
      * {@code docs/superpowers/specs/2026-09-14-targeting-non-living-entities-design.md} first.
      */
     public static boolean isTargetable(Entity entity) {
-        return entity.isAttackable() && entity.isPickable();
+        return entity.isAttackable() && (entity.isPickable() || hasPickablePart(entity));
+    }
+
+    /**
+     * Whether {@code entity} is a multipart entity with at least one part that can be hit.
+     *
+     * <p>The Ender Dragon is vanilla's only one; mods add others, which is why this asks the
+     * general question rather than naming the dragon. {@code getParts()} is a NeoForge extension
+     * on {@code Entity} and returns {@code null} off a non-multipart entity, so both guards are
+     * load-bearing.
+     *
+     * <p>The parts are not scan candidates themselves — {@code ServerLevel} keeps them in a
+     * separate {@code dragonParts} map rather than the entity index, so {@code allEntities} never
+     * sees one. They are consulted here only to answer "could a player hit this thing at all",
+     * and {@code LegacyAgent.attack} is where the hit is actually redirected onto a part.
+     */
+    private static boolean hasPickablePart(Entity entity) {
+        if (!entity.isMultipartEntity()) {
+            return false;
+        }
+
+        PartEntity<?>[] parts = entity.getParts();
+
+        if (parts == null) {
+            return false;
+        }
+
+        for (PartEntity<?> part : parts) {
+            if (part.isPickable()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

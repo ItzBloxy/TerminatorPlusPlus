@@ -201,11 +201,19 @@ it is documented rather than guarded — the same call as the crystal.
 
 ```java
 public static boolean isTargetable(Entity entity) {
-    return entity.isAttackable() && entity.isPickable();
+    return entity.isAttackable() && (entity.isPickable() || hasPickablePart(entity));
 }
 ```
 
-Vanilla's own pair, and nothing else. It is re-evaluated every tick rather than cached, which
+Vanilla's own pair, plus one clause that the first draft of this design got wrong and shipped.
+
+**`isPickable() == false` means two different things.** On `Marker` or `Display` it means nothing
+can ever hit this. On `EnderDragon` it means *aim at one of my parts instead* — every
+`EnderDragonPart` returns `true`, and that indirection is how vanilla makes a player hit a wing
+rather than one bounding box the size of the whole animation. A gate that reads the dragon's
+`false` as the first meaning drops it from the goal entirely, which also makes the head redirect
+below unreachable. `hasPickablePart` asks `isMultipartEntity()` and then whether any part is
+pickable, so it generalises to modded multipart bosses rather than naming the dragon. It is re-evaluated every tick rather than cached, which
 matters because several of these are dynamic: `AbstractBoat.isPickable()` is `!isRemoved()`,
 `AbstractArrow.isPickable()` is `super.isPickable() && !isInGround()`, and
 `AbstractArrow.isAttackable()` is `is(EntityTypeTags.REDIRECTABLE_PROJECTILE)`.
@@ -250,7 +258,8 @@ sets are identical to today's, entity for entity.
 For the `ENTITY` goal, almost every entity that was targetable before still is: `LivingEntity`
 declares `isPickable()` as `!isRemoved()`, and no `LivingEntity` overrides `isAttackable()` to
 `false`. There are exactly **two narrowings**, both of them fixes, and both registered under
-deviation 36 rather than left to look like drift:
+deviation 36 rather than left to look like drift. A third one — the Ender Dragon — was a genuine
+regression that this design originally missed; see the gate above:
 
 - **Armour-stand markers**, which `ArmorStand.isPickable()` already excludes. A marker has no
   hitbox and takes no damage, so a bot that used to walk toward one forever now ignores it.
@@ -275,7 +284,12 @@ GameTests in `EnemyTargetTests`:
    assert the crystal comes back.
 2. **A boat is found**, the same way — proving the widening is general rather than crystal-shaped.
 3. **An item entity is not found** even when its own type is named, proving the gate bites.
-4. **A spectator bot is not found**, pinning one of the two narrowings — and reading directly
+4. **The Ender Dragon is found**, pinning the multipart clause. Spawned, asked about and
+   discarded inside a single tick, with the discard in a `finally` — it is never ticked, so the
+   hazard that ruled a dragon test out (it flies, breaks blocks, wants an `EndDragonFight`
+   context) never arises. The plan's original reasoning was about a *live* dragon and did not
+   survive contact with the bug.
+5. **A spectator bot is not found**, pinning one of the two narrowings — and reading directly
    against the existing `another_bot_is_a_valid_target`, which is the same test with the gamemode
    line removed.
 

@@ -10036,8 +10036,9 @@ the commit message. The sanctioned ones, for reference:
     minecarts, item frames, paintings, lead knots and shulker bullets were invisible to every goal
     — one cause, not seven — and `/tplus enemytarget specific` answered that they could not be
     targeted. The pipeline is now `Entity` throughout, and the `ENTITY` goal scans every entity
-    gated on vanilla's own `isAttackable() && isPickable()`, the pair that decides whether a
-    player's cursor can land on something. The nine other goals keep the living scan: `Monster`,
+    gated on vanilla's own `isAttackable()` and `isPickable()`, the pair that decides whether a
+    player's cursor can land on something — plus a multipart clause, below. The nine other goals
+    keep the living scan: `Monster`,
     `Mob`, `Raider`, `ServerPlayer` and `Bot` are all `LivingEntity`, so widening them would cost
     more and find nothing new.
 
@@ -10059,6 +10060,22 @@ the commit message. The sanctioned ones, for reference:
     returning false; accepted rather than excluded, because a hardcoded list goes stale every
     release and ignores modded entities. Designed in
     `docs/superpowers/specs/2026-09-14-targeting-non-living-entities-design.md`.
+
+    **The gate shipped wrong once, and the correction is part of this entry.** `isPickable()`
+    returning `false` means two different things. On `Marker` or `Display` it means nothing can
+    ever hit this. On `EnderDragon` it means *aim at one of my parts instead* — every
+    `EnderDragonPart` returns `true`, and that indirection is how vanilla makes a player hit a
+    wing rather than one bounding box the size of the whole animation. The first version read the
+    dragon's `false` as the first meaning and dropped it from the goal entirely, which also made
+    deviation 37's head redirect unreachable. The fix is `isPickable() || hasPickablePart(entity)`,
+    where `hasPickablePart` asks NeoForge's `isMultipartEntity()` and then whether any part is
+    pickable — general, so a modded multipart boss works without being named.
+
+    Worth recording *how* it got through: the dragon's `isPickable() == false` was written into
+    this entry, into deviation 37 and into the comment at `LegacyAgent.attack`, each time as the
+    justification for the head redirect. It was never read as a statement about the gate. Four
+    tiers of tests passed, because none of them had a dragon in it; a client session found it in
+    minutes. `a_generic_target_finds_the_ender_dragon` now pins it.
 37. **Bots hit the Ender Dragon's head.** `EnderDragon.hurtServer` routes to
     `hurt(level, this.body, …)`, which opens `if (part != this.head) damage = damage / 4 +
     Math.min(damage, 1)`. A hit worth 8 landed as 3, so bots did a third of a player's damage for
@@ -10067,9 +10084,11 @@ the commit message. The sanctioned ones, for reference:
     found and what navigation aims at. Widening the scan cannot substitute for this — vanilla makes
     players aim at a part, `EnderDragon.isPickable()` is false, and `EnderDragonPart`s live in
     `ServerLevel`'s separate `dragonParts` map rather than the entity index. Upstream had the
-    identical behaviour. No GameTest: a live dragon in a shared test level flies, breaks blocks and
-    wants an `EndDragonFight` context, which is the same hazard that keeps the crystal test from
-    letting a bot swing.
+    identical behaviour. The redirect itself has no GameTest — that would need a bot to land a hit
+    on a live dragon — but the dragon is now spawned, asked about and discarded inside a single
+    tick by `a_generic_target_finds_the_ender_dragon`, which is what proves the redirect is
+    reachable at all. The original "no dragon in a GameTest" reasoning was about a *live* dragon
+    and did not survive contact with the gate bug above.
 
 And two things found in Plan D that are **not** deviations:
 
