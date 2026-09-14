@@ -275,7 +275,16 @@ GameTests in `EnemyTargetTests`:
    assert the crystal comes back.
 2. **A boat is found**, the same way — proving the widening is general rather than crystal-shaped.
 3. **An item entity is not found** even when its own type is named, proving the gate bites.
-4. **An armour-stand marker is not found**, pinning the narrowing above.
+4. **A spectator bot is not found**, pinning one of the two narrowings — and reading directly
+   against the existing `another_bot_is_a_valid_target`, which is the same test with the gamemode
+   line removed.
+
+The other narrowing, the armour-stand marker, is **not** GameTested. `ArmorStand.setMarker` is
+private, and adding an access transformer to the production jar to satisfy a test-only need is the
+worse trade — the project has two AT entries today, both for production code paths. A spectator
+needs no such machinery, because `Bot` is a `ServerPlayer` and `setGameMode` is already used by
+this file's own spawn helper. So the narrowing is documented in deviation 36 and left untested,
+deliberately rather than by oversight.
 
 **The crystal test must not let the bot actually swing.** A power-6 explosion with
 `ExplosionInteraction.BLOCK` breaks blocks, GameTests share a level, and the blast radius reaches
