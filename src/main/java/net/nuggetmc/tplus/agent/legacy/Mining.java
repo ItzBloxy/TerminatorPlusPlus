@@ -230,8 +230,16 @@ public final class Mining {
                 return;
             }
 
-            if (sound != null) {
-                level.playSound(null, pos, sound, SoundSource.BLOCKS, 0.3f, 1f);
+            // The hit sound, not the break sound. Upstream used the break sound for both, and
+            // this branch runs every BREAK_PERIOD ticks -- so a twenty-tick block stacked ten
+            // copies of a one-second shattering noise, and the only thing keeping that bearable
+            // was that bots used to spend most of a tunnel airborne rather than mining. Once
+            // they walked under low ceilings and mined continuously it became constant. Vanilla
+            // draws exactly this distinction. Deviation 35.
+            SoundEvent progressSound = LegacyUtils.hitBlockSound(target);
+
+            if (progressSound != null) {
+                level.playSound(null, pos, progressSound, SoundSource.BLOCKS, 0.3f, 1f);
             }
 
             // No store, so the task spins here forever rather than stopping. Faithfully

@@ -59,4 +59,19 @@ public final class LegacyUtils {
     public static SoundEvent breakBlockSound(BlockState state) {
         return state.getSoundType().getBreakSound();
     }
+
+    /**
+     * The sound a block makes while it is <i>being</i> mined, as opposed to when it gives way.
+     *
+     * <p>New here. Upstream played {@link #breakBlockSound} for both, and its progress task runs
+     * every two ticks — so a block that takes twenty ticks stacked ten copies of a roughly
+     * one-second break sound on top of each other, and a bot tunnelling sounded like a block
+     * shattering continuously. Vanilla makes exactly this distinction: the hit sound for
+     * progress, the break sound once, when the block goes.
+     *
+     * <p>Nothing about mining speed or behaviour changes with it — see deviation 35.
+     */
+    public static SoundEvent hitBlockSound(BlockState state) {
+        return state.getSoundType().getHitSound();
+    }
 }

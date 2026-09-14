@@ -17,6 +17,7 @@ import net.nuggetmc.tplus.agent.legacy.BotBehaviors;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.Mining;
 import net.nuggetmc.tplus.agent.legacy.Navigation;
+import net.nuggetmc.tplus.agent.legacy.ScanOffset;
 import net.nuggetmc.tplus.agent.legacy.SurroundingScan;
 import net.nuggetmc.tplus.agent.legacy.TargetGoal;
 import net.nuggetmc.tplus.bot.Bot;
@@ -28,7 +29,9 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.minecraft.sounds.SoundEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.PlayLevelSoundEvent;
 import net.nuggetmc.tplus.bot.BotRegistry;
 import net.nuggetmc.tplus.motion.MotionVec;
 import net.nuggetmc.tplus.event.BotDeathEvent;
@@ -1085,6 +1088,50 @@ public final class AgentTests {
         helper.succeed();
     }
 
+    @GameTest(timeoutTicks = 600)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("mining_progress_uses_the_hit_sound_not_the_break_sound")
+    static void mining_progress_uses_the_hit_sound_not_the_break_sound(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NONE);
+        Bot bot = spawn(helper, registry, new BlockPos(6, 1, 7), "Miner");
+
+        // NORTH resolves to botPos.above().north(), which is what currentTarget() will compute
+        // every run -- so the break task stays aimed at this block instead of aborting.
+        BlockPos target = new BlockPos(6, 2, 6);
+        helper.setBlock(target, Blocks.STONE);
+
+        Mining mining = new Mining(registry.state(), registry.agent());
+        SoundSpy spy = new SoundSpy();
+        NeoForge.EVENT_BUS.register(spy);
+
+        try {
+            mining.preBreak(bot, helper.absolutePos(target), ScanOffset.NORTH);
+
+            // Long enough to break it: iron is 20 ticks, and the scheduler only advances inside
+            // registry.tick().
+            run(registry, 40);
+
+            var type = Blocks.STONE.defaultBlockState().getSoundType();
+
+            // Vanilla plays the short hit sound while a block is being mined and saves the break
+            // sound for the moment it gives way. Upstream played the BREAK sound every two ticks,
+            // so ~15 copies of a one-second sound stacked on every block.
+            helper.assertTrue(spy.count(type.getHitSound()) > 1,
+                    "mining progress must use the hit sound; heard "
+                            + spy.count(type.getHitSound()) + " hit, "
+                            + spy.count(type.getBreakSound()) + " break");
+
+            helper.assertTrue(spy.count(type.getBreakSound()) <= 1,
+                    "the break sound belongs to the block giving way, once; heard "
+                            + spy.count(type.getBreakSound()));
+        } finally {
+            NeoForge.EVENT_BUS.unregister(spy);
+        }
+
+        registry.reset();
+        helper.succeed();
+    }
+
     @GameTest(timeoutTicks = 400)
     @EmptyTemplate(value = "15x6x15", floor = true)
     @TestHolder("a_bot_under_a_low_ceiling_walks_instead_of_jumping")
@@ -1282,5 +1329,20 @@ final class RetargetHandler {
         if (event.getBot() != target) {
             event.setTarget(target);
         }
+    }
+}
+
+/** Records every positioned sound the level plays, so a test can assert on which one. */
+final class SoundSpy {
+
+    private final List<SoundEvent> heard = new ArrayList<>();
+
+    @SubscribeEvent
+    public void onSound(PlayLevelSoundEvent.AtPosition event) {
+        heard.add(event.getSound().value());
+    }
+
+    int count(SoundEvent sound) {
+        return (int) heard.stream().filter(s -> s == sound).count();
     }
 }

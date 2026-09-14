@@ -9994,6 +9994,15 @@ the commit message. The sanctioned ones, for reference:
     measures against the aim point. `/tplus descendrange unlimited` restores upstream's
     behaviour; the second branch's own `horizontal < 10` is untouched. Designed in
     `docs/superpowers/specs/2026-09-14-descend-range-design.md`.
+35. **Mining progress plays the block's hit sound; only the break plays the break sound.**
+    Upstream used `breakBlockSound` for both, and `blockBreakEffect`'s task runs every
+    `BREAK_PERIOD` (2) ticks — so a twenty-tick block stacked ten copies of a roughly one-second
+    shattering noise at 0.3 volume, and a tunnelling bot sounded like continuous demolition.
+    Vanilla draws exactly this distinction, and `LegacyUtils.hitBlockSound` is the one-line
+    counterpart to the existing helper. Audio only: no change to break speed, progress, drops or
+    behaviour. Found in a client session after the walk gear (deviation 34) made bots mine
+    continuously instead of spending most of a tunnel airborne — measured at sound playing on 49%
+    of ticks where it had been 7%, which is what made a long-standing wart audible.
 
 And two things found in Plan D that are **not** deviations:
 
