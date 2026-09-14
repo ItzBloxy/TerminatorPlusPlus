@@ -764,6 +764,13 @@ EOF
 - Consumes: `Bot.attack(Entity)` from Task 1.
 - Produces: nothing new.
 
+> **Corrected during execution.** The reasoning below is about a *live* dragon and it held, but
+> the conclusion did not. A dragon that is spawned, asked about and discarded inside one tick is
+> never ticked and never grief-prone, and that test —
+> `a_generic_target_finds_the_ender_dragon` — is what caught the gate bug that made this whole
+> task unreachable: `isTargetable` rejected the dragon because `EnderDragon.isPickable()` is
+> `false`. Write that test as part of Task 2, not Task 4. See deviation 36.
+
 **No automated test, and the reason matters.** A live `EnderDragon` in a GameTest is the same
 hazard as a live end crystal — it flies, it has AI, it breaks blocks, and these tests share a level
 — and it additionally expects an `EndDragonFight` context that a test structure in the overworld
