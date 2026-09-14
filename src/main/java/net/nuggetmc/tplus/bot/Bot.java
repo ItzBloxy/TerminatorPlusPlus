@@ -14,6 +14,7 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
@@ -377,9 +378,32 @@ public class Bot extends ServerPlayer {
         setRot(yaw, pitch);
     }
 
-    /** Pushes this bot's dirty entity data to clients, as the shield path does around blocking. */
-    public void broadcastEntityData() {
-        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), getEntityData().packDirty()));
+    /**
+     * Pushes this bot's dirty entity data to clients, if there is any.
+     *
+     * <p><b>The null check is load-bearing and its absence is invisible to every test.</b>
+     * {@code SynchedEntityData.packDirty()} returns null when nothing is dirty, and
+     * {@code ClientboundSetEntityDataPacket.pack()} iterates that list without checking. The NPE
+     * therefore happens in the packet <i>encoder</i>, on a Netty thread — so it never reaches the
+     * server's tick, never appears as a bot tick failure, and simply drops the client's
+     * connection with an {@code EncoderException}. {@code BotConnection} swallows packets without
+     * encoding them, so no GameTest can see it either: this shipped past 176 of them and an RCON
+     * pass, and killed the first real client session within seconds of a bot drawing a bow.
+     *
+     * <p>Vanilla does the same check — {@code ServerEntity.sendDirtyEntityData} guards on
+     * {@code packedValues != null} before constructing the packet. This is that guard.
+     *
+     * @return whether anything was actually sent
+     */
+    public boolean broadcastEntityData() {
+        List<SynchedEntityData.DataValue<?>> dirty = getEntityData().packDirty();
+
+        if (dirty == null) {
+            return false;
+        }
+
+        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), dirty));
+        return true;
     }
 
     /** Swings the main hand. Vanilla broadcasts the animation packet for us. */
@@ -575,7 +599,7 @@ public class Bot extends ServerPlayer {
         this.blockUse = true;
 
         startUsingItem(InteractionHand.OFF_HAND);
-        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), getEntityData().packDirty()));
+        broadcastEntityData();
     }
 
     private void stopBlocking(int cooldown) {
@@ -587,7 +611,7 @@ public class Bot extends ServerPlayer {
             registry.scheduler().runLater(cooldown, () -> this.blockUse = false);
         }
 
-        BotFactory.broadcast(this, new ClientboundSetEntityDataPacket(getId(), getEntityData().packDirty()));
+        broadcastEntityData();
     }
 
     /**

@@ -2,6 +2,7 @@ package net.nuggetmc.tplus.gametest;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
@@ -122,6 +123,36 @@ public final class BotArcheryTests {
         bot.setBow(new ItemStack(Items.BOW));
         bot.setBow(null);
         helper.assertFalse(bot.hasBow(), "a null stack must disarm too");
+
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 100)
+    @EmptyTemplate(value = "9x5x9", floor = true)
+    @TestHolder("an_entity_data_broadcast_with_nothing_dirty_sends_nothing")
+    static void an_entity_data_broadcast_with_nothing_dirty_sends_nothing(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1), "DirtyBot");
+
+        // SynchedEntityData.packDirty() returns NULL when nothing is dirty, and
+        // ClientboundSetEntityDataPacket.pack() iterates that list without a null check. The NPE
+        // therefore lands in the packet ENCODER, on the Netty thread -- which means it surfaces
+        // as an EncoderException that drops a real client's connection, and is completely
+        // invisible here, because BotConnection swallows packets and never encodes them.
+        //
+        // That is exactly how this shipped: 176 GameTests and an RCON pass saw nothing, and the
+        // first client session was disconnected within seconds of a bot drawing a bow. So the
+        // assertion is on whether a packet is BUILT at all, not on whether sending it throws.
+        //
+        // Vanilla's ServerEntity.sendDirtyEntityData null-checks before constructing the packet.
+        bot.startUsingItem(InteractionHand.MAIN_HAND);
+
+        helper.assertTrue(bot.broadcastEntityData(),
+                "a bot that just started using an item has dirty data and must send it");
+
+        helper.assertFalse(bot.broadcastEntityData(),
+                "a second broadcast with nothing dirty must send nothing; packDirty() is null "
+                        + "there and the packet encoder would NPE on a real connection");
 
         helper.succeed();
     }
