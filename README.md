@@ -104,11 +104,12 @@ negotiation, so it is not representative of production.
 ## Sixty-second start
 
 ```
-/tplus create Hunter 5 none netherite diamond minecraft:bow
+/tplus create Hunter 5 none netherite diamond minecraft:netherite_sword minecraft:bow
 ```
 
-Five bots called Hunter, in netherite armour, carrying diamond tools and a bow. Then pick what
-they hunt:
+Five bots called Hunter, in netherite armour, carrying diamond tools and a netherite sword, with a
+bow stowed. They fight with the sword and switch to the bow when closing in is the wrong answer —
+a flying target, a squad already towering, or being stuck. Then pick what they hunt:
 
 ```
 /tplus goal nearestvulnerableplayer
@@ -145,6 +146,7 @@ the filler** for the two tier slots.
 | `/tplus create Bob 5 none diamond` | diamond armour |
 | `/tplus create Bob 5 none diamond netherite` | …and netherite tools |
 | `/tplus create Bob 5 none none none minecraft:trident` | just a weapon |
+| `/tplus create Bob 5 none none none minecraft:netherite_sword minecraft:bow` | a weapon and a stowed bow. Passing a bow as the *weapon* works too, but costs the bot its melee damage — the 1.8 table has no bow entry |
 
 The name is looked up on Mojang's session servers for a skin, so `/tplus create Technoblade` looks
 like Technoblade. A name nobody owns gets the default skin. `count` is capped at **100** per
@@ -244,6 +246,9 @@ zero or more.
 | `/tplus drops <true\|false>` | whether bots drop their gear on death | off |
 | `/tplus offsets <true\|false>` | converge on a ring around the target instead of one point | on |
 | `/tplus descendrange <blocks>` | how close, horizontally, a stuck bot must be before it tunnels down toward a target below it | 8 |
+| `/tplus bow <item\|none>` | give every bot a stowed bow, or clear the slot | — |
+| `/tplus ranged <auto\|always\|never>` | whether bots may shoot. `auto` lets the rules decide; `always` skips the rules but not the gates | auto |
+| `/tplus towerquota <n>` | how many squadmates must already be towering near the target before the next bot shoots instead of joining them | 3 |
 
 `agent`, `drops` and `offsets` require their argument — there is no report form.
 `descendrange` reports when given none, and takes `unlimited` to lift the cap entirely, which is
@@ -262,7 +267,7 @@ everything.
 | Command | Reports |
 |---|---|
 | `/tplus list` | names of every loaded bot |
-| `/tplus info <name>` | dimension, position, velocity, health, alive ticks, kills, player-list membership, skin state |
+| `/tplus info <name>` | dimension, position, velocity, health, alive ticks, kills, ranged mode and the rule behind it, player-list membership, skin state |
 | `/tplus remove <name>` | — |
 | `/tplus removeall` | — |
 
@@ -348,9 +353,13 @@ Honest about the gaps, because some of them are large. The full list with reason
 
 <br>
 
-- **Bots cannot use items.** Food, potions, bows and the shield all wait on one missing piece — a
+- **Bots cannot use most items.** Food, potions and the shield all wait on one missing piece — a
   use-tick. `/tplus bot <name> shield true` puts a shield in the off-hand and it will never be
-  raised — the command does not warn you, so consider this the warning.
+  raised — the command does not warn you, so consider this the warning. **Bows are the exception,
+  and they did not unblock the others:** firing skips `BowItem.releaseUsing` entirely, because the
+  only thing it needed from the frozen counter was how long the draw had been held, which the bot
+  already knew. The draw animation rides the same packet pair the shield uses. So the count of
+  features the use-tick would unlock is three, not four.
 - **No self-preservation.** Nothing in the codebase branches on health, so bots never retreat,
   disengage, or eat. They regenerate passively and walk into whatever is killing them. Armour
   changes how long a bot lasts, not what it does.

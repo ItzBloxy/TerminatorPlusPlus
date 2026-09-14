@@ -61,20 +61,43 @@ Adding real survival behaviour means a health-aware branch in `tickBot` and a fl
 Plan D's armour changes how long a bot lasts and not what it does, which is worth being clear
 about: netherite buys time, and a bot still walks into the thing killing it.
 
-### Bots cannot use items
+### Bots cannot use most items
 
-A bot never ticks item use — `startUsingItem` appears once, in the shield path, which is why the
-shield is inert and documented as such. Food, potions, bows and shields all need the same missing
-piece: a use-tick. Build it once and four features become possible.
+A bot never ticks item use — `startUsingItem` appears in the shield path and in `Archery`, and the
+shield is inert because of it. Food, potions and shields all need the same missing piece: a
+use-tick. Build it once and **three** features become possible.
 
-### Ranged attacks
+It was four until bows shipped. Bows turned out not to need it: only the first step of
+`BowItem.releaseUsing` reads the frozen `useItemRemaining` counter, and only to recover how long
+the draw had been held — which the bot already knew, because it started the draw. The arrow is
+spawned directly and the draw animation rides the same packet pair the shield sends. **That did
+not unblock the other three**, and a working bow is not evidence they are close. Deviation 41.
 
-`LegacyAgent.attack` is melee-only. A bow needs the use-tick above, plus a ranged branch in the
-attack decision and something to say when a bot prefers distance to closing.
+### The rest of ranged combat
 
-Plan D closed half of this without meaning to: `/tplus create Archer 3 none none none minecraft:bow`
-arms a squad with bows at spawn. They hold them and hit people with them. The missing piece is
-still the use-tick.
+**Bows themselves are built** — deviations 38–43, designed in
+`docs/superpowers/specs/2026-09-14-bow-and-ranged-combat-design.md`. A bot carries a bow in a slot
+of its own and holds position to shoot instead of towering when the target has been aloft 40 ticks,
+when enough squadmates are already towering, or when it is stuck. What is listed here is what that
+work deliberately left out.
+
+**`target_camping`** — the target is well above the bot and its Y has stopped rising, meaning it has
+settled on a pillar rather than actively climbing. The only one of the four candidate rules needing
+new per-target state: `btList` and `btCheck` sample the *bot's* own column, and nothing records a
+target's Y history. Adding it costs a sampler, one `RangedContext` component and one `RangedRule`
+entry, and reshapes nothing, because the decision is already a pure function of a record.
+
+**`unreachable`** — a gap, ravine or lava lake between bot and target. Needs a reachability concept
+the agent has not got; see **A pathfinding and goal visualiser** below. `bot_stuck` catches most of
+the same situations a few seconds later, for one map lookup.
+
+**`target_fleeing`** — distance trending upward. Needs the same kind of history `target_camping`
+does.
+
+**A retreat, or a preferred-range band.** The most convincing archer, and the only option that
+stops a bot walking into what it is shooting. It needs a flee vector in `Navigation`, which is the
+same genuine design change **Bots have no self-preservation** above describes — so these two are
+one piece of work, not two.
 
 ### A pathfinding and goal visualiser
 
@@ -115,6 +138,9 @@ knows the clutch exists.
 `BlockScan.placeFinal` calls `setBlockAndUpdate` with no entity-occupancy check, which is upstream's
 behaviour. Several bots towering in one column will seal each other in. A check against entities in
 the target block would fix it and would be a deliberate divergence worth registering.
+
+The `tower_quota` rule reduces how many bots reach one column — past the quota the rest shoot
+instead of climbing — but it is a mitigation, not a fix. `placeFinal` still has no check.
 
 ### Break speed ignores hardness
 

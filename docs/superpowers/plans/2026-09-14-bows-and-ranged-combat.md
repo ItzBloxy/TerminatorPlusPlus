@@ -3073,10 +3073,10 @@ python tools/rcon.py "tplus create Hunter 3 none none iron minecraft:netherite_s
 Then check each of these returns a sentence rather than an error:
 
 ```bash
-python tools/rcon.py "tplus ranged" "tplus ranged always" "tplus towerquota" "tplus towerquota 5" "tplus bow minecraft:bow" "tplus info Hunter1" "tplus bow none" "tplus ranged auto"
+python tools/rcon.py "tplus ranged" "tplus ranged always" "tplus towerquota" "tplus towerquota 5" "tplus bow minecraft:bow" "tplus info Hunter" "tplus bow none" "tplus ranged auto"
 ```
 
-`tplus info Hunter1` must show a `Ranged:` line. This tier is here because it catches command-tree
+`tplus info Hunter` must show a `Ranged:` line. This tier is here because it catches command-tree
 and server-runtime failures that GameTests pass straight over — a `ConfigSync` crash survived 51
 GameTests once.
 
@@ -3249,6 +3249,6 @@ Connect to localhost and check, in order:
 4. Arrows render in flight and arc toward you rather than flying flat.
 5. The release sound fires **once** per shot, not every tick.
 6. Land and walk within 4 blocks. Bots swap back to the sword and punch.
-7. `/tplus info Hunter1` shows a `Ranged:` line whose reason matches what you just watched.
+7. `/tplus info Hunter` shows a `Ranged:` line whose reason matches what you just watched.
 
 Bots need a player nearby to tick — `/forceload` is not enough. If nothing happens, check `Alive ticks` is climbing in `/tplus info`.

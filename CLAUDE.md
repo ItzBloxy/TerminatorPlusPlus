@@ -140,6 +140,22 @@ Renames and traps this port walked into:
 - `ItemInput.createItemStack(int)` takes one argument.
 - **Constructing an `ItemStack` in a static initialiser throws "Components not bound yet"** and
   breaks mod loading outright. Hold `Item` constants and build stacks at the call site.
+- **`pvp` is a gamerule now, not a `server.properties` flag.** `GameRules.PVP`,
+  `registerBoolean("pvp", PLAYER, true)`, read per-level by `ServerLevel.isPvpAllowed()`. It gates
+  player-owned arrows at two sites — `AbstractArrow.canHitEntity` passes the arrow straight
+  through, and `ServerPlayer.hurtServer` refuses the damage — so it silently disables archer bots
+  while melee bots, which call `hurtServer` directly, keep working. See deviation 42.
+- **An arrow is born at `getEyeY() - 0.1F`, not at the eye,** and flies under gravity 0.05 with
+  0.99 drag applied in that order *after* the move: `AbstractArrow.tick` moves, then
+  `applyInertia`, then `applyGravity`. `BowBallistics` depends on all three facts, and its
+  arrival-height curve is **not** monotonic in pitch — it is negative infinity at both ±89°,
+  where horizontal speed vanishes and the arrow never covers the distance, so a plain bisection
+  cannot bracket a root.
+- **`Level.getEntities` merges `dragonParts()` into every query,** so projectiles hit the Ender
+  Dragon with no special handling — but they hit whichever part is in the way, and
+  `EnderDragon.hurt` quarter-damages everything but the head.
+- `SoundEvents.ARROW_SHOOT` is a bare `SoundEvent`; `SoundEvents.SHIELD_BLOCK` is a `Holder` and
+  needs `.value()`. Both spellings sit in this tree, a few files apart.
 - Access transformers in `src/main/resources/META-INF/accesstransformer.cfg` — currently
   `LivingEntity.detectEquipmentUpdates()V` and `PlayerList.players`.
 

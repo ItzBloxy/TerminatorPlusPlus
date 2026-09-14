@@ -10090,6 +10090,74 @@ the commit message. The sanctioned ones, for reference:
     reachable at all. The original "no dragon in a GameTest" reasoning was about a *live* dragon
     and did not survive contact with the gate bug above.
 
+38. **A ranged branch in `tickBot`.** Inserted between the melee attack block and the
+    grounded-navigation block; returns "handled" while RANGED, which is what suppresses movement.
+    Upstream had no ranged combat at all. Three things ride along with it:
+
+    **The no-target reset.** `tickBot` returns above the insertion when the goal finds nothing, so
+    the branch also adds `archery.reset(bot)` beside the existing `mining.stopMining(bot)` there.
+    It is two touch points in the method, not one. Without it a bot that is mid-draw when its
+    target dies holds a drawn bow in a phase that never advances, indefinitely — and it is
+    invisible to every test that keeps its target alive, which is all of the others.
+
+    **A ranged line-of-sight predicate distinct from the melee one.** `LegacyUtils.checkFreeSpace`
+    samples 32 points per block and treats `WATER`, `LAVA`, `FIRE` and vegetation as passable,
+    because it is a movement predicate bounded at 4 blocks by the melee gate that calls it. The
+    ranged check (`RangedSight`) samples 4 points per block, caches on `tickDelay(3)`, and treats
+    water and lava as blocking — an arrow through water drops to `WATER_INERTIA = 0.6` and falls
+    short, and one through lava catches fire. Same two-ray shape, different constants and a
+    different notion of empty. `MAX_RANGE` is 24 rather than a bow's true reach for the same
+    reason: at 32 samples per block a 40-block ray is ~1,280 block lookups per ray per bot per
+    tick.
+
+    **The Ender Dragon aim point.** `Level.getEntities` merges `dragonParts()` into every query,
+    so arrows hit the dragon unaided — but they hit whichever part is in the way, and
+    `EnderDragon.hurt` quarter-damages everything except the head. Deviation 37 fixed that for
+    melee by redirecting the recipient; a projectile has no recipient to redirect, so the fix
+    moves into the aim point and `Archery` aims at `dragon.head.position()`. An improvement in
+    expectation, not a guarantee — a wing can still intercept.
+
+39. **Arrow damage is vanilla's, not the 1.8 table.** `AbstractArrow.baseDamage = 2.0` scaled by
+    velocity. `ItemUtils.getLegacyAttackDamage` is deliberately not consulted: it is a *melee*
+    table, it has no bow entry, and its `FIST = 0.25` fallback is exactly the bug that made
+    Plan D's `/tplus create Archer 3 none none none minecraft:bow` bots useless — they held bows
+    and punched for a quarter heart.
+
+40. **Infinite ammunition.** A fresh `ItemStack(Items.ARROW)` per shot;
+    `ProjectileWeaponItem.useAmmo` and the bot's inventory are never touched. Consistent with the
+    cobblestone a bot towers with, the water buckets it clutches with and tools that never lose
+    durability. Spawned arrows are `Pickup.DISALLOWED`, so twenty archers do not carpet the ground
+    with collectables — each of which would also be a plausible `enemytarget generic
+    minecraft:arrow` result.
+
+41. **`BowItem.releaseUsing` is bypassed.** Only its first step reads the frozen
+    `useItemRemaining` counter, and only to recover how long the draw has been held — which
+    `Archery` already knows, because it started the draw. The arrow is spawned directly the way
+    `Projectile.spawnProjectileFromRotation` does, and the draw *animation* rides the same
+    `startUsingItem` + entity-data broadcast pair the shield path already sends.
+
+    **This does not deliver the generic use-tick.** `docs/backlog.md` filed bows under "bots
+    cannot use items" alongside food, potions and the shield, all waiting on one missing piece.
+    That was true of the other three and false of the bow. They are exactly as blocked after this
+    work as before it, so the count the use-tick would unlock is three, not four, and a working
+    bow is not evidence they are close.
+
+42. **Archer bots are gated by the `pvp` gamerule; melee bots are not.** 26.2 moved `pvp` from
+    `server.properties` to `GameRules.PVP` (default true), enforced in
+    `AbstractArrow.canHitEntity` — the arrow passes straight through — and again in
+    `ServerPlayer.hurtServer`. The melee path calls `hurtServer` with
+    `damageSources().playerAttack(this)` directly and ignores all of it. So with `pvp` off, melee
+    bots keep killing players and archer bots silently stop. Accepted rather than worked around:
+    an ownerless arrow would work but lose kill attribution and break `BotKilledByPlayerEvent`,
+    and a scoreboard team would mutate global server state to fix a case the operator caused
+    deliberately. `/tplus bow` and `/tplus ranged` warn when it is off, which turns the silence
+    into a sentence.
+
+43. **Ranged state lives in `Archery`, not `AgentState`.** The first step of the narrowing the
+    backlog asks for, taken on new state where there is no sharing semantic to guess at, because
+    nothing outside the owner reads it. `BotRegistry.remove` calls a new `Agent.forgetBot(bot)`
+    beside `state.forget(bot)`, and `LegacyAgent.stopAllTasks` clears it.
+
 And two things found in Plan D that are **not** deviations:
 
 > `TargetGoal.PLAYER`'s description claims it falls back to `NEAREST_VULNERABLE_PLAYER` when no
