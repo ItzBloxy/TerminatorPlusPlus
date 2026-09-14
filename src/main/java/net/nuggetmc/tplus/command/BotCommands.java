@@ -215,6 +215,17 @@ public final class BotCommands {
                             return 1;
                         })));
 
+        // Not the offsets block's inline `instanceof LegacyAgent`, which silently succeeds when
+        // no legacy agent is installed. That is harmless for a write-only toggle and wrong for a
+        // command that also reports -- it would print a number governing nothing.
+        root.then(Commands.literal("descendrange")
+                .executes(BotCommands::showDescendRange)
+                .then(Commands.literal("unlimited")
+                        .executes(ctx -> setDescendRange(ctx, LegacyAgent.DESCEND_RANGE_UNLIMITED)))
+                .then(Commands.argument("blocks", IntegerArgumentType.integer(0))
+                        .executes(ctx -> setDescendRange(ctx,
+                                IntegerArgumentType.getInteger(ctx, "blocks")))));
+
         // Seven arguments in the worst case, so the coordinates come as two block positions
         // and the weights are optional on the end.
         root.then(Commands.literal("region")
@@ -950,6 +961,46 @@ public final class BotCommands {
     }
 
     /** The installed agent, or null with a message already sent to the source. */
+    /**
+     * Reports the descent range.
+     *
+     * <p>A range of 0 is a real setting rather than a degenerate one: {@code horizontal < 0}
+     * never holds, so stuck bots stop descending entirely and only bots already beside their
+     * target dig down. It is the far end of the same dial and needs no special case.
+     */
+    private static int showDescendRange(CommandContext<CommandSourceStack> ctx) {
+        LegacyAgent agent = legacyAgent(ctx);
+
+        if (agent == null) {
+            return 0;
+        }
+
+        int range = agent.descendRange;
+        String text = range == LegacyAgent.DESCEND_RANGE_UNLIMITED
+                ? "Descent range is unlimited — bots tunnel down toward a target at any distance."
+                : "Descent range is " + range + " blocks.";
+
+        ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+        return 1;
+    }
+
+    private static int setDescendRange(CommandContext<CommandSourceStack> ctx, int range) {
+        LegacyAgent agent = legacyAgent(ctx);
+
+        if (agent == null) {
+            return 0;
+        }
+
+        agent.descendRange = range;
+
+        String text = range == LegacyAgent.DESCEND_RANGE_UNLIMITED
+                ? "Descent range set to unlimited"
+                : "Descent range set to " + range + " blocks";
+
+        ctx.getSource().sendSuccess(() -> Component.literal(text), true);
+        return 1;
+    }
+
     private static LegacyAgent legacyAgent(CommandContext<CommandSourceStack> ctx) {
         if (TerminatorPlus.registry().agent() instanceof LegacyAgent agent) {
             return agent;
