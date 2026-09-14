@@ -10,7 +10,7 @@ They hunt a target, mine through walls, tower, clutch out of falls, bridge over 
 [![NeoForge](https://img.shields.io/badge/NeoForge-26.2.0.87-F16436?style=flat-square)](https://neoforged.net)
 [![Java](https://img.shields.io/badge/Java-25-E76F00?style=flat-square&logo=openjdk&logoColor=white)](https://adoptium.net)
 [![Gradle](https://img.shields.io/badge/Gradle-9.2.1-02303A?style=flat-square&logo=gradle&logoColor=white)](https://gradle.org)
-[![Version](https://img.shields.io/badge/version-5.1.0--ALPHA-DFB317?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-5.2.0--ALPHA-DFB317?style=flat-square)](#status)
 [![Licence](https://img.shields.io/badge/licence-EPL--2.0-0A7BBB?style=flat-square)](LICENSE)
 
 **Vanilla clients connect.** No modpack, no resource pack, nothing on their end.
@@ -32,7 +32,7 @@ below to be missing, and do not run it anywhere you would mind it breaking.
 <a id="status"></a>
 
 > [!WARNING]
-> **Status: 5.1.0-ALPHA.** The agent works and has been played against. The public API module and
+> **Status: 5.2.0-ALPHA.** The agent works and has been played against. The public API module and
 > the neural-network AI are not ported yet — see [What is not built yet](#what-is-not-built-yet).
 
 ## Contents
@@ -63,7 +63,7 @@ Server-side only. Clients connect with vanilla.
 | **Client** | Anything. Vanilla 26.2 is fine |
 | **Permission** | `/tplus` needs permission level 2 — operators have it by default |
 
-1. Download `tplus-5.1.0-ALPHA.jar` from [Releases](https://github.com/ItzBloxy/TerminatorPlusPlus/releases)
+1. Download `tplus-5.2.0-ALPHA.jar` from [Releases](https://github.com/ItzBloxy/TerminatorPlusPlus/releases)
    and drop it into `mods/`.
 2. Start the server.
 3. `/tplus` is available to operators.
@@ -80,7 +80,7 @@ Needs **JDK 25**. The Gradle wrapper fetches everything else.
 ./gradlew jar
 ```
 
-`build` compiles and runs the 109 unit tests; `jar` writes `build/libs/tplus-5.1.0-ALPHA.jar`.
+`build` compiles and runs the 138 unit tests; `jar` writes `build/libs/tplus-5.2.0-ALPHA.jar`.
 
 <details>
 <summary><b>The other run tasks</b></summary>
@@ -89,7 +89,7 @@ Needs **JDK 25**. The Gradle wrapper fetches everything else.
 
 | Task | What it does |
 |---|---|
-| `./gradlew runGameTestServer` | 147 in-world GameTests, headless |
+| `./gradlew runGameTestServer` | 180 in-world GameTests, headless |
 | `./gradlew runServer` | dev server, RCON on 25575 |
 | `./gradlew runClient` | dev client, for the things a person has to watch |
 
@@ -262,6 +262,40 @@ same setting there. `descendrange` only bites below 10 on drops *shallower* than
 is the one case the older rule cannot reach. Setting it above 10 raises the threshold for
 everything.
 
+<details>
+<summary><b>When a bot picks up the bow</b></summary>
+
+<br>
+
+A bot carries its bow stowed and fights with its weapon. It plants and draws only when closing the
+distance is the wrong answer, which is any one of:
+
+| Rule | Meaning |
+|---|---|
+| `target_flying` | the target has been off the ground for two seconds — Phantoms, Ghasts, the Ender Dragon, elytra, creative flight, anything modded |
+| `tower_quota` | enough squadmates near the target are already towering, so this one provides fire instead of joining the pile |
+| `bot_stuck` | the bot has not left its own block column for a second: walled in, wedged, or digging a tunnel it will never finish |
+
+And only when all of these hold: it has a bow, the target is vulnerable and **4 to 24 blocks**
+away, it has line of sight, its feet are on the ground, and fewer than four squadmates are pressed
+against it. Any one failing drops it back to chasing on that tick — a rule going quiet keeps it
+shooting for two more seconds, but a failed condition does not.
+
+`/tplus info <name>` names the rule in force, so "why is this one not shooting?" has an answer.
+
+Three things to know:
+
+- **The `pvp` gamerule gates arrows but not melee.** With it off, arrows pass straight through
+  players while punching still works, so archers go quiet and nothing says why. `/tplus bow` and
+  `/tplus ranged` warn you when it is off.
+- **A bow in the weapon slot costs melee damage.** `/tplus create Archer 3 none none none
+  minecraft:bow` shoots fine, but the 1.8 damage table has no entry for a bow, so those bots punch
+  for a quarter heart. Give the bow its own argument to get both.
+- **Friendly fire is on.** A bot packed into a crowd drops back to melee rather than firing into
+  it, and one whose line is blocked holds its shot, but a loose arrow in a scrum still lands.
+
+</details>
+
 ### Managing bots
 
 | Command | Reports |
@@ -324,6 +358,10 @@ Beyond the port itself, things the Paper plugin did not have:
   crystals, boats, minecarts, item frames and paintings could not be hunted at all. A bot now
   targets whatever a player could hit. Ender dragons also take full damage rather than a quarter,
   because bots aim at the head like everyone else.
+- **Bows, and a reason to use one.** Upstream's combat was melee only. A bot can now carry a bow
+  beside its weapon and hold position to shoot when closing in is the wrong answer — a flying
+  target, a squad already towering, or being stuck. Arrows are aimed against real gravity and drag
+  and lead a moving target. See [Equipment and behaviour](#equipment-and-behaviour).
 - **`/tplus tools`**, and both targeting commands now set the goal themselves instead of telling you
   to go and do it.
 
@@ -362,14 +400,19 @@ Honest about the gaps, because some of them are large. The full list with reason
   features the use-tick would unlock is three, not four.
 - **No self-preservation.** Nothing in the codebase branches on health, so bots never retreat,
   disengage, or eat. They regenerate passively and walk into whatever is killing them. Armour
-  changes how long a bot lasts, not what it does.
+  changes how long a bot lasts, not what it does. That regeneration is half a heart a second,
+  which is why ranged mobs look unable to hurt them at all: a blaze fireball is healed away in
+  seven seconds, and a same-damage volley is mostly swallowed by invulnerability frames anyway.
+  Both are faithful to upstream — see [`docs/backlog.md`](docs/backlog.md).
 - **No pathfinder.** Worth saying plainly, because it explains a lot of what you will see: there is
   no graph and no cost function. A bot normalises a vector at its target, jumps, and mines whatever
   is in the way. That is why they prefer straight lines, and why one below you mines to your level
   first and then across.
 - **The MLG is a reflex, not a route.** The water clutch runs only once the game has decided a bot
   is falling too fast, so a bot will never deliberately drop to you and clutch.
-- Bots can seal each other in when several tower in one column.
+- Bots can seal each other in when several tower in one column. `/tplus towerquota` thins out
+  how many reach the same column, but it is a mitigation rather than a fix — nothing checks
+  whether a block is about to be placed inside another bot.
 
 </details>
 
@@ -401,8 +444,8 @@ Each catches a class of defect the others cannot.
 | Tier | Catches | Blind to |
 |---|---|---|
 | Signature checks against the patched sources jar | Compile errors, 26.2 renames | Everything else |
-| **109 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
-| **147 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
+| **138 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
+| **180 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
 | `runServer` driven over RCON | Server-runtime crashes, command trees | Anything visual |
 | A real client | Rendering, skins, projectile collision, packet ordering | — |
 | Diffing against `paper-original` | Silent behaviour drift | — |
@@ -411,6 +454,12 @@ That last pair earns its place. A manual client session once found **four** bugs
 and three RCON sessions all passed over — bots spawning in Creative and so immune to arrows, entity
 packets sent before player info, unsigned skins that render nothing, and a missing skin-layer mask.
 A green suite is not the same thing as "it works".
+
+Bows added a fifth, and a sharper one. A malformed entity-data packet threw inside the packet
+*encoder*, on a network thread — so it never reached the server tick, never counted as a bot
+failure, and the server logged nothing; it simply dropped the client. GameTests cannot catch that
+class at all, because a bot's fake connection swallows packets without ever encoding them. It
+passed the whole suite and an RCON sweep, then disconnected the first real client within seconds.
 
 ### Repository layout
 

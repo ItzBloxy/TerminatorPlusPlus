@@ -178,6 +178,12 @@ Renames and traps this port walked into:
 - `docs/superpowers/specs/…-loadouts-and-entity-targeting-design.md` — Plan D's spec. These are
   features upstream never had, so it stands in where there is no `paper-original` to check against
 - `docs/superpowers/plans/…-d-loadouts-targeting.md` — Plan D, complete
+- **After Plan D the work is per-feature rather than per-plan**, each a dated spec and a plan of
+  the same name: shears and tool coverage, descend range, targeting non-living entities, walk vs
+  jump, and `2026-09-14-bow-and-ranged-combat-design.md` — bows and ranged combat, the largest of
+  them, deviations 38–43. That spec carries a **Corrections after implementation** section: the
+  body is the approved design and the corrections are what the build disproved, kept separate on
+  purpose
 - `docs/backlog.md` — what is not built yet, and why
 - `README.md` — the user-facing description, install and full command reference. Keep it true; it
   is the only document a stranger reads

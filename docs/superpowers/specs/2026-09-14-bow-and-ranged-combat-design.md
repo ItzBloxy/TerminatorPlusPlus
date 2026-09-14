@@ -559,3 +559,38 @@ none of them usefully moving.
 level for one line of code, but it mutates global server state, it makes any real player who joins
 that team immune to bots, and it would also silently disable bot-on-bot melee. Friendly fire stays
 on, with crowding and the firing-line check as the mitigation.
+
+---
+
+## Corrections after implementation
+
+The body above is the design as it was approved. Four things were wrong or missing, and the build
+found each of them. They are recorded here rather than edited into the body, so the design and the
+corrections stay distinguishable — the same reason deviation 36 carries its own correction.
+
+**Arrival height is not monotonic in pitch, so a plain bisection cannot solve the trajectory.**
+The Aiming section says to "binary-search the launch pitch". That does not converge: the curve is
+negative infinity at *both* ±89°, where horizontal speed is about 0.05 blocks a tick and the arrow
+never covers the distance at all, and it rises to a peak between them. A bisection reads "never
+arrived" as "arrived low" and declares every shot out of reach — nine of ten ballistics tests
+failed on the first run. `BowBallistics` scans coarsely downward for the first crossing and
+bisects inside that bracket, which also selects the flatter of the two arcs.
+
+**The firing-line check must exclude the target, not just the shooter.** Bots are `ServerPlayer`s,
+so a bot hunting another bot — which is exactly what `TOWER_QUOTA` and the `NEAREST_BOT` goals
+produce — put its own target on the line and vetoed every shot.
+`a_bot_draws_and_fires_at_a_flying_target` caught it immediately: the decision read
+`RANGED / TARGET_FLYING` and no arrow ever left.
+
+**`broadcastEntityData` must not build a packet when nothing is dirty.**
+`SynchedEntityData.packDirty()` returns null, and `ClientboundSetEntityDataPacket.pack()` iterates
+it unchecked, so the NPE lands in the encoder on a Netty thread — invisible to the server tick and
+to every GameTest, because `BotConnection` swallows packets without encoding them. It dropped the
+first real client within seconds of a bot drawing. Vanilla's `ServerEntity.sendDirtyEntityData`
+guards on the same null; this now does too, and the two pre-existing shield call sites route
+through the same helper. See CLAUDE.md's testing-tier note.
+
+**`/tplus info` prints the rule's label, not a rendered explanation.** The Commands section shows
+`Ranged: MELEE (distance 3.1 < 4)`. What ships is `Ranged: MELEE (too_close)` — the
+`RangedRule` label. The label is stable and the numbers are not, which is the more useful thing to
+pin, but the examples above overstate it.
