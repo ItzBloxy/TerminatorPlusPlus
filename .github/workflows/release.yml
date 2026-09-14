@@ -1,0 +1,83 @@
+name: "Release"
+
+# Tags only -- never a branch push and never a manual dispatch. The tag is what names the release
+# and what the built jar is checked against, so a run without one has nothing to verify.
+on:
+  push:
+    tags:
+      - "v*"
+
+# gh release create writes to the repository. Nothing else in this workflow needs a token.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Same ceiling as compile.yml: the GameTest step boots a Minecraft server, and a hung one
+    # should fail in minutes rather than sit on a runner until the six-hour default expires.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # "basic" is the MIT-licensed actions/cache implementation. v6 defaults to "enhanced",
+          # which loads gradle-actions-caching -- closed source, under Gradle Technologies' own
+          # terms of use rather than the MIT licence covering the rest of the action. compile.yml
+          # opted out of that deliberately; a second workflow must not reintroduce it by omission.
+          cache-provider: basic
+
+      # Without this, pushing v5.1.0-ALPHA while gradle.properties still reads 5.0.0-ALPHA builds
+      # tplus-5.0.0-ALPHA.jar and attaches it to a release called v5.1.0-ALPHA.
+      - name: Check the tag matches mod_version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(grep -E '^mod_version=' gradle.properties | cut -d= -f2)"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME implies version '$tag', but gradle.properties says '$version'." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      # Fails the release rather than publishing one with empty notes.
+      - name: Extract the changelog section for this tag
+        run: |
+          awk -v tag="## $GITHUB_REF_NAME" '
+            $0 == tag { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ -z "$(tr -d '[:space:]' < release-notes.md)" ]; then
+            echo "CHANGELOG.md has no '## $GITHUB_REF_NAME' section, or it is empty." >&2
+            exit 1
+          fi
+
+      - name: Execute Gradle build
+        run: ./gradlew build
+
+      # Before the release is created, so a failing test means no release exists at all -- the
+      # same order and the same reason as compile.yml's artifact upload.
+      - name: Run the in-world GameTests
+        run: ./gradlew runGameTestServer
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A version carrying a suffix -- 5.1.0-ALPHA, 5.2.0-BETA, 5.2.0-rc1 -- is a prerelease.
+          case "$version" in
+            *-*) prerelease="--prerelease" ;;
+            *)   prerelease="" ;;
+          esac
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            $prerelease \
+            "build/libs/tplus-$version.jar"
