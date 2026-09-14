@@ -79,8 +79,13 @@ Five new pieces. Three of them never touch a `Level`.
 | `RangedContext` | `bot.ranged` | A record of scalars sampled from the world for one bot on one tick |
 | `RangedDecision` | `bot.ranged` | `decide(RangedContext)` → the mode and the rule that produced it |
 | `RangedRule` | `bot.ranged` | The named reasons — both the rules that produce RANGED and the gate failures that produce MELEE — for `/tplus info` and for tests |
-| `BowBallistics` | `bot.ranged` | `solve(eye, aimPoint, targetVelocity, power)` → a pitch and yaw |
+| `BowBallistics` | `bot.ranged` | `solve(origin, aimPoint, targetVelocity, power)` → a pitch and yaw |
 | `Archery` | `agent.legacy` | The collaborator: samples the context, runs the decision, owns the draw state machine and the hand |
+
+Plus one field on `Bot`: **the bow slot**, beside `defaultItem`, with a getter and setter. It needs
+to live there rather than in `Archery` because four things outside the agent touch it —
+`BotFactory`/`create` set it at spawn, `/tplus bow` writes it, `/tplus info` prints it, and the
+"`defaultItem` is itself a bow" shortcut resolves against it.
 
 `RangedDecision` and `BowBallistics` are pure. That is deliberate and follows the rule CLAUDE.md
 states plainly: `EnemyTarget.matches` takes an `EntityType` and a `UUID` rather than an `Entity` so
@@ -102,12 +107,12 @@ is the easy case: nothing outside `Archery` reads it, so there is no sharing sem
 ### Where it slots into `tickBot`
 
 CLAUDE.md: *"The ordering inside `tickBot` is the specification for the rest of the port. Every
-terrain check returns 'handled, stop here', so moving one changes behaviour."* This adds exactly one
-branch and one `return`, immediately after the melee attack block and before the grounded-navigation
-block:
+terrain check returns 'handled, stop here', so moving one changes behaviour."* This adds **two**
+touch points — the branch itself, and a reset on the path that never reaches it:
 
 ```
 targeting.locateTarget
+if (livingTarget == null) { mining.stopMining(bot); >>> archery.reset(bot); return; }
 blockScan.tryPreMLG          ← a falling bot saves itself first, always
 blockScan.clutch
 fallDamageCheck
@@ -121,11 +126,31 @@ Everything above the insertion is either safety or the existing melee path, and 
 movement. That placement *is* the hold-position decision — it is expressed as ordering rather than
 as a flag, which is the shape the rest of this class already has.
 
-It also settles hand contention with no extra mechanism. `setItem(null)`, which restores
-`defaultItem`, is called from exactly two places that matter here: `Navigation.move` and
-`BotBehaviors.resetHand`. Both sit below the return. So while a bot is RANGED nothing fights the bow
-out of its hand, and the first `resetHand` after flipping back to MELEE restores the sword by
-itself.
+**The reset is not optional and is easy to miss.** `tickBot` returns at line 138 when there is no
+target, *above* the insertion point, so a bot that is mid-draw when its target dies, teleports away
+or is filtered out by the goal never reaches `archery.tick` again. Without the reset it holds a
+drawn bow, in a `DRAWING` state that never advances, until something else happens to it. The
+existing `mining.stopMining(bot)` on that same line exists for exactly this reason, and the reset
+goes beside it.
+
+### Hand contention needs two mechanisms, not none
+
+`setItem(null)`, which restores `defaultItem`, is called from `Navigation.move` and
+`BotBehaviors.resetHand`, and both sit below the return — so while a bot is RANGED nothing fights
+the bow out of its hand, and the first `resetHand` after flipping back to MELEE restores the sword
+by itself. That much is free. Two things above the return are not:
+
+- **`boatCooldown` must be honoured.** `BotBehaviors.boatOverLava`, reached from
+  `miscellaneousChecks`, puts an `OAK_BOAT` in the bot's hand and marks `state.boatCooldown`.
+  `resetHand` already has an early return for that set — its comment reads "leaves the boat in its
+  hand" — and `Archery` must take the same early return, or a bot crossing a lava lake swaps the
+  boat for a bow mid-crossing.
+- **`mining.stopMining(bot)` on entering RANGED.** The melee branch is guarded by
+  `!state.miningAnim.containsKey(bot)`, but nothing guards the ranged one — and `BOT_STUCK` fires
+  *precisely* when a bot is mining and getting nowhere, so a mining bot entering RANGED is the
+  common case rather than an edge one. Both `Navigation.tower` and `resetHand` call `stopMining`
+  before taking the hand; this does the same. `state.noFace` is then moot, because it is only
+  populated on the mining path.
 
 ### The draw runs in `tickBot`, not on the scheduler
 
@@ -160,13 +185,48 @@ All of these must hold before any rule is consulted. Failing any one means MELEE
 |---|---|
 | The bot has a bow | The bow slot, or `defaultItem` is a `BowItem` |
 | Target is not invincible | `PlayerUtils.isInvincible(gameMode)` — the same call the melee gate makes |
-| `distance > 4` | The melee floor. Literally the constant in `LegacyAgent.attack`'s third gate |
-| `distance ≤ MAX_RANGE` | New. Default 40 |
-| Line of sight | `LegacyUtils.checkFreeSpace(botEye, targetEye) \|\| checkFreeSpace(botEye, targetPos)` — the identical two-ray check melee uses, reused verbatim |
+| `distance ≥ 4` | The melee floor, and the exact complement of the melee gate — `LegacyAgent.attack`'s third condition is `distanceTo(target) >= 4` → *skip*, so melee fires below 4 and ranged at or above it. Writing this `> 4` would leave a hairline gap at exactly 4.0 where a bot does neither |
+| `distance ≤ MAX_RANGE` | New. Default **24**, not 40 — see the cost note below |
+| Line of sight | Two rays, as melee does, but **not** `checkFreeSpace` verbatim — see below |
 | The bot is on the ground | `isBotOnGround()`. An airborne bot cannot aim, and hold-position means it will be grounded anyway |
 | The bot is not crowded | Fewer than `CROWD_LIMIT` other bots within `CROWD_RADIUS`. Defaults 4 and 4.0 |
 
-Two of those deserve their reasoning written down.
+### Line of sight cannot be `checkFreeSpace` verbatim
+
+The first draft of this spec said the melee check could be reused unchanged. It cannot, for two
+independent reasons, and both were found by reading it rather than by assuming it.
+
+**It is priced for four blocks, not forty.** `LegacyUtils.checkFreeSpace` samples **32 points per
+block of distance** — `j = floor(length * 32)`, one `BlockPos.containing` and one `getBlockState`
+per step. Melee pays 128 lookups because it is bounded by the same 4-block gate that calls it, and
+it pays them only on `tickDelay(3)`. A 40-block ray is 1,280 lookups, doubled when the first ray
+fails and the second runs, every tick, per bot. A hundred bots is on the order of a quarter of a
+million block lookups per tick. Three changes bring it back in budget:
+
+- `MAX_RANGE` defaults to **24**, not 40. That is comfortably inside a bow's useful range and cuts
+  the worst-case ray by 40%.
+- The ranged check samples **4 points per block**, not 32. A step of 0.25 blocks still cannot pass
+  through any full block, so nothing that blocks a bot blocks less reliably; only sub-block geometry
+  and thin diagonal gaps read differently, and `checkFreeSpace` already documents that it is not a
+  raycast and misses those anyway.
+- It is evaluated on `tickDelay(3)`, matching melee's cadence, and the result is cached in the
+  per-bot archery state between evaluations.
+
+Together that is 96 lookups per ray every three ticks — 32 per tick — against 1,280 per tick today's
+constants would give at 40 blocks. A **40× reduction**, and it lands slightly cheaper per bot than
+the melee check it is modelled on, which pays 128 samples on the same 3-tick cadence.
+
+**It disagrees with a projectile about what is empty.** `BlockRules.isAir` is a set-membership test,
+not `state.isAir()`, and the set contains `WATER`, `LAVA`, `FIRE`, `SOUL_FIRE`, `SNOW`, vines, ferns,
+grasses, seagrass, kelp and sunflower. That is correct for its actual job — it is a *movement*
+predicate, and a bot can walk or swim through all of those. It is wrong for a projectile: an arrow
+crossing water drops to `WATER_INERTIA = 0.6` and falls short, and one crossing lava catches fire.
+The ranged check therefore treats water and lava as blocking while keeping the vegetation
+exemptions, which is a deliberate divergence from the melee predicate rather than a copy of it.
+
+Recorded as part of deviation 38.
+
+### Two gates deserve their reasoning written down
 
 **Crowding gates the mode, not the shot.** A bot squashed among hunters drops to MELEE and falls
 through to navigation, so it pushes forward and de-crowds itself rather than standing in the scrum
@@ -197,8 +257,16 @@ Any one true, with every gate passing, means RANGED.
 shortcut. 26.2 has no `FlyingMob` class to test against, and CLAUDE.md already makes the argument
 against type tables for `enemytarget generic`: they go stale every release and are wrong for modded
 entities. Off-the-ground-for-N covers Phantoms, Ghasts, the Ender Dragon, elytra players, creative
-flight and anything a mod adds, with nothing to maintain. N = 40 because a jumping player is
-airborne for about 11 ticks, so the margin is comfortable.
+flight and anything a mod adds, with nothing to maintain. N = 40 because a player's jump arc is
+about 12 ticks, so the margin is more than 3×.
+
+**The counter is per bot and resets on target change.** `Targeting.locateTarget` runs every tick and
+may return a different entity than it did last tick — a closer player, a newly-spawned mob — so an
+aloft count carried across a switch would let a grounded target inherit a Phantom's 40 ticks and
+flip the bot to RANGED against something standing on the floor. `Archery` stores the target's UUID
+alongside the count and zeroes both when the UUID changes. Per bot rather than per target, because a
+per-target map would need its own eviction for entities that die or unload, and the observation is
+cheap enough to duplicate.
 
 `TOWER_QUOTA` costs almost nothing to compute: `state.towerList` is already "which bots are towering
 and where they started", `tickBot` already removes a bot from it once it climbs above its target,
@@ -225,7 +293,7 @@ it, and getting it backwards would be a bug:
   `TARGET_FLYING`'s threshold, or a squadmate finishing its tower and dropping `TOWER_QUOTA` below
   Q for a few ticks. The bot keeps firing rather than flickering in and out of navigation.
 
-Scoping it this way means the melee floor needs no special case — `distance > 4` is a gate, so it
+Scoping it this way means the melee floor needs no special case — `distance ≥ 4` is a gate, so it
 already flips instantly. A bot standing at point-blank holding a half-drawn bow while something
 punches it is the single worst thing this feature could produce, and it falls out of the rule rather
 than being patched around.
@@ -234,17 +302,28 @@ than being patched around.
 
 ## Aiming
 
-An arrow flies under gravity 0.05 with 0.99 drag per tick (`AbstractArrow.INERTIA`), which has no
-closed-form solution. `BowBallistics` simulates instead: step the arrow forward under the same two
-constants and binary-search the launch pitch until it passes within tolerance of the aim point. Then
-one lead pass — re-solve against `aimPoint + targetVelocity × flightTime`, where the flight time
-falls out of the first solve.
+An arrow flies under gravity 0.05 (`AbstractArrow.getDefaultGravity`) with 0.99 drag per tick
+(`AbstractArrow.INERTIA`), which has no closed-form solution. `BowBallistics` simulates instead:
+step the arrow forward under the same two constants and binary-search the launch pitch until it
+passes within tolerance of the aim point. Then one lead pass — re-solve against
+`aimPoint + targetVelocity × flightTime`, where the flight time falls out of the first solve.
+
+**The launch origin is not the bot's eye.** `AbstractArrow(type, mob, level, …)` delegates to
+`mob.getX(), mob.getEyeY() - 0.1F, mob.getZ()`, so the solver must be given that point or its
+answer is consistently biased. It matters less for the angle than for the tests — `BowBallistics` is
+a pure function and its fixtures will encode whatever origin the spec names, so naming the wrong one
+bakes the error into the suite.
+
+Launch speed is exactly the power figure: `Projectile.getMovementToShoot` normalises the direction
+and scales by `pow`, so a full draw leaves the bow at 3.0 blocks per tick.
 
 About thirty lines, entirely pure, and unit-testable against known trajectories. The cheap
-alternative is the Skeleton fudge — `aim at targetY + horizontalDistance × 0.2`, from
-`RangedAttackMob` implementations — and it is rejected because a full-draw arrow covers roughly 3
-blocks per tick, so a 20-block shot is about 7 ticks in the air and a sprinting target moves ~2.4
-blocks in that time. A bow that misses is not a feature.
+alternative is the Skeleton fudge — `AbstractSkeleton.performRangedAttack` adds
+`distanceToTarget * 0.2F` to the Y delta — and it is rejected for two reasons. It is tuned for the
+`1.6F` launch speed a skeleton uses and does not transfer to a bow's 3.0. And it does not lead a
+moving target at all: integrating 3.0 blocks/tick against 0.99 drag puts a 20-block shot about
+**7 ticks** in the air, in which a sprinting player covers roughly **2 blocks** — against a hitbox
+0.6 wide. A bow that misses is not a feature.
 
 ### The aim point, and the dragon
 
@@ -313,7 +392,7 @@ message. Deviation 42, and a new 26.2 API note in CLAUDE.md.
 |---|---|
 | `create <name> <count> <playerlist> <armor> <tools> <item> <bow>` | A seventh argument on the existing fixed-depth chain |
 | `/tplus bow <item>` | Arms every bot, mirroring `/tplus give`. `none` disarms |
-| `/tplus ranged <auto\|always\|never>` | Global override. `always` skips the rules but **not** the gates; `never` disables the feature |
+| `/tplus ranged <auto\|always\|never>` | Global override. `always` skips the rules but **not** the gates; `never` disables the feature and resets every bot, since one may be mid-draw when it is typed |
 | `/tplus towerquota <n>` | The one tuning knob, because squad coordination is the point |
 
 `/tplus info` gains a line, which is the entire reason for choosing named rules over a score:
@@ -351,9 +430,14 @@ be worse than the fist damage. The damage is a consequence of the 1.8 table, not
   crowding overriding `TOWER_QUOTA`, the hysteresis window holding a RANGED bot through a rule going
   false, and **every gate bypassing that window** — one test per gate, because the
   rules-hysteresise-but-gates-do-not split is the easiest thing here to implement backwards.
-- `BowBallistics`: a level 20-block shot, a 30-block upward shot, a downward shot, and a target
+- `RangedDecision`: the aloft counter resets when the target UUID changes, so a grounded target
+  cannot inherit a Phantom's count.
+- `BowBallistics`: a level 20-block shot, a 16-block upward shot, a downward shot, and a target
   moving 0.4 blocks per tick. Each asserts the simulated arrow passes within tolerance of the aim
-  point.
+  point. One fixture is deliberately set beyond `MAX_RANGE`, to pin that the solver has no notion of
+  range — that is the gate's job, and a solver that silently refused long shots would make the gate
+  untunable. Fixtures use `eyeY - 0.1` as the origin, matching `AbstractArrow`'s constructor — get
+  that wrong and the suite happily pins the bias.
 - `RangedContext` carries `boolean hasBow` rather than an `ItemStack`, so none of this needs a
   running server.
 
@@ -366,14 +450,32 @@ be worse than the fist damage. The damage is a consequence of the 1.8 table, not
 - A bot with no line of sight does not draw.
 - A crowded bot falls through to navigation.
 - `TOWER_QUOTA`: with Q bots in `towerList` near the target, the next bot goes RANGED.
+- **Water between bot and target blocks the shot**, where the melee predicate would call the same
+  line clear. This is the test that pins the divergence in deviation 38 and stops someone "tidying"
+  the ranged check back into `checkFreeSpace`.
+- **A drawing bot whose target is removed resets.** Kill or discard the target mid-draw, tick once,
+  and assert the bot is `IDLE` with its default item in hand. Without the reset beside
+  `mining.stopMining` this hangs forever, and it is invisible from every other test because every
+  other test keeps its target alive.
+- **A bot on `boatCooldown` keeps the boat.** The one that catches a lava crossing being broken by a
+  bow swap.
+- **Entering RANGED stops a running mining animation** — `state.miningAnim` no longer contains the
+  bot. `BOT_STUCK` fires precisely when a bot is mining and getting nowhere, so this is the common
+  path, not an edge case.
 - **A RANGED bot's XZ does not change over 100 ticks.** This is the test that pins the whole
   hold-position decision, and the one most likely to catch an accidental reordering of `tickBot`.
 
-Conventions the suite requires and this feature must respect: `@TestHolder` on every test, or it is
-silently unregistered and the suite still reports success. Targets are bots, not mock players.
-`invulnerableTime` and `noFallTicks` both start at 60 and are drained before any damage assertion.
-And `Archery`'s per-bot state is cleared in a `finally` — it is the same shared-JVM trap that
-`BlockRules`' static solid-override set already carries.
+That last one deliberately ticks and waits, which CLAUDE.md's GameTest conventions warn against
+("`move()` adds `Math.random()` to every jump, so any test that runs 200 ticks and asserts on
+position is measuring the walk, not the decision"). The warning does not apply to asserting the
+*absence* of movement: if the bot holds position there is no jump and no random term, and if the
+branch is wrong the bot moves and the test fails. It is the one case where ticking is the assertion.
+
+Other conventions the suite requires: `@TestHolder` on every test, or it is silently unregistered
+and the suite still reports success. Targets are bots, not mock players. `invulnerableTime` and
+`noFallTicks` both start at 60 and are drained before any damage assertion. And `Archery`'s per-bot
+state is cleared in a `finally` — it is the same shared-JVM trap that `BlockRules`' static
+solid-override set already carries.
 
 ### A real client session — not optional
 
@@ -392,11 +494,23 @@ To be appended to Plan B's register, which every later plan extends.
 
 38. **A ranged branch in `tickBot`.** Inserted between the melee attack block and the
     grounded-navigation block; returns "handled" while RANGED, which is what suppresses movement.
-    Upstream had no ranged combat at all. Includes the Ender Dragon aim point: `Level.getEntities`
-    merges `dragonParts()`, so arrows hit the dragon unaided, but `EnderDragon.hurt` quarter-damages
-    every part except the head and a projectile cannot be redirected the way deviation 37 redirects
-    a melee hit — so `Archery` aims at `dragon.head.position()` instead. An improvement in
-    expectation, not a guarantee.
+    Upstream had no ranged combat at all. Three things ride along with it:
+
+    **The no-target reset.** `tickBot` returns above the insertion when the goal finds nothing, so
+    the branch also adds `archery.reset(bot)` beside the existing `mining.stopMining(bot)` there. It
+    is two touch points in the method, not one.
+
+    **A ranged line-of-sight predicate distinct from the melee one.** `LegacyUtils.checkFreeSpace`
+    samples 32 points per block and treats `WATER`, `LAVA`, `FIRE` and vegetation as passable,
+    because it is a movement predicate bounded at 4 blocks. The ranged check samples 4 points per
+    block, caches on `tickDelay(3)`, and treats water and lava as blocking — an arrow through water
+    drops to `WATER_INERTIA = 0.6` and falls short. Same two-ray shape, different constants and a
+    different notion of empty.
+
+    **The Ender Dragon aim point.** `Level.getEntities` merges `dragonParts()`, so arrows hit the
+    dragon unaided, but `EnderDragon.hurt` quarter-damages every part except the head and a
+    projectile cannot be redirected the way deviation 37 redirects a melee hit — so `Archery` aims
+    at `dragon.head.position()` instead. An improvement in expectation, not a guarantee.
 39. **Arrow damage is vanilla's, not the 1.8 table.** `AbstractArrow.baseDamage = 2.0` scaled by
     velocity. `ItemUtils.getLegacyAttackDamage` is a melee table with no bow entry, whose
     `FIST = 0.25` fallback is the reason today's `/tplus create Archer` bots are useless.
