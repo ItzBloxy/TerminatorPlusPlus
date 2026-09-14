@@ -245,7 +245,7 @@ public final class Targeting {
                 EnemyTarget enemy = bot.getEnemyTarget();
 
                 if (!enemy.isEmpty()) {
-                    for (LivingEntity entity : livingEntities(level)) {
+                    for (Entity entity : allEntities(level)) {
                         // `bot != entity` or `generic player` makes every bot target itself and
                         // stand still. Other bots are deliberately not excluded: bots are
                         // ServerPlayers, and naming one with `specific` is the point.
@@ -255,8 +255,13 @@ public final class Targeting {
                         // be compared against. With a set of one the first candidate meets a
                         // null incumbent anyway and range is skipped, so a single specific
                         // target behaves exactly like PLAYER.
+                        //
+                        // `matches` is tested before `isTargetable` for selectivity, not for
+                        // meaning: this scan now walks dropped items and experience orbs too, and
+                        // a set lookup rejects almost all of them before two virtual calls run.
                         if (bot != entity
                                 && enemy.matches(entity.getType(), entity.getUUID())
+                                && isTargetable(entity)
                                 && validateCloserEntity(bot, entity, pos, result)) {
                             result = entity;
                         }
@@ -283,6 +288,48 @@ public final class Targeting {
      */
     private static List<? extends LivingEntity> livingEntities(ServerLevel level) {
         return level.getEntities(EntityTypeTest.forClass(LivingEntity.class), e -> true);
+    }
+
+    /**
+     * Every entity in the level, living or not.
+     *
+     * <p>Only the {@code ENTITY} goal uses this. The nine goals above it look for
+     * {@code Monster}, {@code Mob}, {@code Raider}, {@code ServerPlayer} or {@code Bot} — all of
+     * them {@code LivingEntity} — so widening their scan would cost more and find nothing new.
+     *
+     * <p>Same shape and the same cost as {@link #livingEntities}: {@code getEntities} walks every
+     * entity in the level and type-tests each one, so the living scan was never cheaper in kind.
+     */
+    private static List<? extends Entity> allEntities(ServerLevel level) {
+        return level.getEntities(EntityTypeTest.forClass(Entity.class), e -> true);
+    }
+
+    /**
+     * Whether a bot could actually land a hit on {@code entity}.
+     *
+     * <p>Vanilla's own pair and deliberately nothing else. {@code isAttackable} and
+     * {@code isPickable} are what decide whether a player's cursor can land on a thing, so a bot
+     * that respects them targets exactly what a player could: end crystals, boats, minecarts,
+     * item frames, paintings, lead knots and shulker bullets in; dropped items, experience orbs,
+     * falling blocks, area-effect clouds, displays, markers and armour-stand markers out.
+     *
+     * <p>Re-evaluated every tick rather than cached, because several of these are dynamic —
+     * {@code AbstractBoat.isPickable()} is {@code !isRemoved()} and
+     * {@code AbstractArrow.isPickable()} is {@code super.isPickable() && !isInGround()}.
+     *
+     * <p><b>Two vanilla entities pass this and can never be damaged, and that is known rather
+     * than missed.</b> {@code PrimedTnt} and {@code Interaction} are both pickable and inherit
+     * {@code isAttackable() == true}, but each declares {@code hurtServer} {@code final}
+     * returning a constant {@code false}. Excluding them would mean a hardcoded list that goes
+     * stale on the next Minecraft release and ignores modded entities; detecting it from
+     * {@code hurtServer}'s return value needs a consecutive-failure counter, because a
+     * {@code LivingEntity} returns false during its invulnerability window too. So an operator
+     * who types {@code /tplus enemytarget generic minecraft:tnt} gets bots that stand beside lit
+     * TNT swinging at something they cannot hurt. Do not "fix" this without reading
+     * {@code docs/superpowers/specs/2026-09-14-targeting-non-living-entities-design.md} first.
+     */
+    public static boolean isTargetable(Entity entity) {
+        return entity.isAttackable() && entity.isPickable();
     }
 
     /**

@@ -4,7 +4,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.cow.Cow;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.testframework.annotation.ForEachTest;
@@ -32,8 +37,9 @@ import java.util.Set;
  * <p>{@code EnemyTarget.matches} is unit tested without a world. What needs a world is the rest
  * of the branch: the entity scan, the self-exclusion, and what happens to a target that dies.
  *
- * <p><b>GameTests share a level, not just a JVM.</b> The ENTITY goal scans every living entity in
- * it and has no range limit, so a test here can see entities belonging to tests running at other
+ * <p><b>GameTests share a level, not just a JVM.</b> The ENTITY goal scans every entity in it --
+ * living or not, since deviation 36 -- and has no range limit, so a test here can see entities
+ * belonging to tests running at other
  * structure positions. Assertions must therefore be about the <i>rule</i> -- "not itself", "not the
  * cow" -- and not about the level being empty, which it never is.
  *
@@ -194,6 +200,95 @@ public final class EnemyTargetTests {
 
         helper.assertTrue(locate(registry, hunter) == quarry,
                 "a specific target must be able to name another bot");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "11x5x11", floor = true)
+    @TestHolder("a_generic_target_finds_an_end_crystal")
+    static void a_generic_target_finds_an_end_crystal(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithEntityGoal();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 5), "Hunter");
+        EndCrystal crystal = helper.spawn(EntityTypes.END_CRYSTAL, new BlockPos(8, 1, 5));
+
+        bot.setEnemyTarget(EnemyTarget.ofTypes(
+                Set.of(EntityTypes.END_CRYSTAL), "minecraft:end_crystal"));
+
+        // locateTarget directly, and never a ticked registry: a crystal that actually dies
+        // explodes at 6.0F with ExplosionInteraction.BLOCK, and these tests share a level. The
+        // blast would break blocks belonging to tests running at other structure positions.
+        helper.assertTrue(locate(registry, bot) == crystal,
+                "an end crystal is not a LivingEntity and must still be found");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "11x5x11", floor = true)
+    @TestHolder("a_generic_target_finds_a_boat")
+    static void a_generic_target_finds_a_boat(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithEntityGoal();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 5), "Hunter");
+        Boat boat = helper.spawn(EntityTypes.OAK_BOAT, new BlockPos(8, 1, 5));
+
+        bot.setEnemyTarget(EnemyTarget.ofTypes(
+                Set.of(EntityTypes.OAK_BOAT), "minecraft:oak_boat"));
+
+        // The crystal alone would not prove much -- it could have been special-cased. A boat
+        // reaches Entity through VehicleEntity rather than directly, so the pair shows the
+        // widening is general rather than crystal-shaped.
+        helper.assertTrue(locate(registry, bot) == boat,
+                "a boat is not a LivingEntity and must still be found");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "11x5x11", floor = true)
+    @TestHolder("a_dropped_item_is_never_targetable")
+    static void a_dropped_item_is_never_targetable(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithEntityGoal();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 5), "Hunter");
+
+        ItemEntity dropped = helper.spawn(EntityTypes.ITEM, new BlockPos(3, 1, 5));
+        dropped.setItem(new ItemStack(Items.DIRT));
+
+        bot.setEnemyTarget(EnemyTarget.ofTypes(Set.of(EntityTypes.ITEM), "minecraft:item"));
+
+        // ItemEntity.isAttackable() is false, so the gate refuses it even though the target
+        // names its exact type and it is the nearest thing in the structure. Asserting the rule
+        // and not the level: other tests' entities share this level, so "found nothing" would be
+        // the wrong assertion -- "did not find the item" is the right one.
+        helper.assertFalse(locate(registry, bot) == dropped,
+                "a dropped item cannot be hit, so it must never be chosen");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "11x5x11", floor = true)
+    @TestHolder("a_spectator_is_never_targetable")
+    static void a_spectator_is_never_targetable(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithEntityGoal();
+        Bot hunter = spawn(helper, registry, new BlockPos(1, 1, 5), "Hunter");
+        Bot ghost = spawn(helper, registry, new BlockPos(8, 1, 5), "Ghost");
+
+        ghost.setGameMode(GameType.SPECTATOR);
+
+        // Read against another_bot_is_a_valid_target, which is this test with one line removed.
+        // Player.isPickable() is `!isSpectator() && super.isPickable()`, so the gate refuses what
+        // the old `instanceof LivingEntity` test admitted. A narrowing, and a fix: a spectator
+        // cannot be hit by anything, so chasing one was a command that succeeded and did nothing.
+        hunter.setEnemyTarget(EnemyTarget.ofEntities(
+                Set.of(ghost.getUUID()), "1 entities (player)"));
+
+        helper.assertFalse(locate(registry, hunter) == ghost,
+                "a spectator cannot be hit, so it must never be chosen");
 
         registry.reset();
         helper.succeed();
