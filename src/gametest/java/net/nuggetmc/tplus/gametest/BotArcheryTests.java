@@ -157,6 +157,144 @@ public final class BotArcheryTests {
         helper.succeed();
     }
 
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "15x5x5", floor = true)
+    @TestHolder("a_blaze_fireball_hurts_a_bot")
+    static void a_blaze_fireball_hurts_a_bot(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot victim = spawn(helper, registry, new BlockPos(11, 1, 2), "Scorched");
+
+        for (int i = 0; i < 70; i++) {
+            victim.tick();
+        }
+
+        float before = victim.getHealth();
+
+        Vec3 from = Vec3.atCenterOf(helper.absolutePos(new BlockPos(2, 2, 2)));
+        Vec3 to = victim.position().add(0, 1, 0);
+
+        net.minecraft.world.entity.projectile.hurtingprojectile.SmallFireball fireball =
+                new net.minecraft.world.entity.projectile.hurtingprojectile.SmallFireball(
+                        helper.getLevel(), from.x, from.y, from.z, to.subtract(from).normalize());
+
+        helper.getLevel().addFreshEntity(fireball);
+
+        for (int i = 0; i < 60 && victim.getHealth() >= before; i++) {
+            fireball.tick();
+            victim.tick();
+        }
+
+        helper.assertTrue(victim.getHealth() < before,
+                "a blaze fireball must hurt a bot; health stayed at " + victim.getHealth()
+                        + ", fireball at " + fireball.position() + " alive=" + fireball.isAlive()
+                        + ", victim pickable=" + victim.isPickable()
+                        + " hittable=" + victim.canBeHitByProjectile()
+                        + " gameMode=" + victim.gameMode()
+                        + " invulnerable=" + victim.getAbilities().invulnerable
+                        + " difficulty=" + helper.getLevel().getDifficulty());
+
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "15x5x5", floor = true)
+    @TestHolder("a_hostile_mob_can_target_a_bot")
+    static void a_hostile_mob_can_target_a_bot(ExtendedGameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(11, 1, 2), "Prey");
+
+        for (int i = 0; i < 70; i++) {
+            bot.tick();
+        }
+
+        // Probe 1: is the bot in the level's player list at all? NearestAttackableTargetGoal
+        // special-cases Player.class and routes to getNearestPlayer, which iterates players().
+        boolean inLevelPlayers = level.players().contains(bot);
+
+        // Probe 2: would a hostile actually select it?
+        net.minecraft.world.entity.monster.Blaze blaze =
+                net.minecraft.world.entity.EntityTypes.BLAZE.create(
+                        level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        helper.assertTrue(blaze != null, "blaze must be creatable");
+
+        Vec3 at = Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(2, 1, 2)));
+        blaze.snapTo(at.x, at.y, at.z, 0f, 0f);
+        level.addFreshEntity(blaze);
+
+        net.minecraft.world.entity.ai.targeting.TargetingConditions conditions =
+                net.minecraft.world.entity.ai.targeting.TargetingConditions.forCombat().range(48.0);
+
+        net.minecraft.world.entity.player.Player nearest =
+                level.getNearestPlayer(conditions, blaze, blaze.getX(), blaze.getEyeY(), blaze.getZ());
+
+        boolean canSeeAsEnemy = bot.canBeSeenAsEnemy();
+
+        blaze.discard();
+
+        helper.assertTrue(inLevelPlayers && nearest == bot,
+                "a hostile must be able to select a bot as its target. inLevelPlayers=" + inLevelPlayers
+                        + " nearestIsBot=" + (nearest == bot)
+                        + " nearest=" + (nearest == null ? "null" : nearest.getName().getString())
+                        + " canBeSeenAsEnemy=" + canSeeAsEnemy
+                        + " invulnerable=" + bot.getAbilities().invulnerable
+                        + " gameMode=" + bot.gameMode());
+
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 300)
+    @EmptyTemplate(value = "9x5x9", floor = true)
+    @TestHolder("passive_regeneration_erases_a_fireball_in_seven_seconds")
+    static void passive_regeneration_erases_a_fireball_in_seven_seconds(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        Bot bot = spawn(helper, registry, new BlockPos(1, 1, 1), "Regen");
+
+        for (int i = 0; i < 70; i++) {
+            bot.tick();
+        }
+
+        // Why this test exists. "Mob projectiles do not damage hunters" was reported from a play
+        // session, and it is not true: a_blaze_fireball_hurts_a_bot proves the damage lands and
+        // a_hostile_mob_can_target_a_bot proves the mob selects the bot. What actually happens is
+        // that Bot.regenerate adds REGEN_PER_TICK every tick UNCONDITIONALLY -- 0.5 HP a second --
+        // so a hit is healed away before the next volley arrives and a bot appears immune.
+        //
+        // That rate is upstream's: its Bot.tick has `float regenAmount = 0.025f` in the same
+        // position, verified against paper-original. This pins the consequence so the number
+        // cannot drift silently, and so anyone who changes it sees what it was buying.
+        float max = bot.getMaxHealth();
+
+        // A blaze fireball is 5.0 base; DamageScaling.WHEN_CAUSED_BY_LIVING_NON_PLAYER takes it
+        // to min(5/2 + 1, 5) = 3.5 on EASY, which is what run/server.properties is set to.
+        bot.setHealth(max - 3.5f);
+
+        // 3.5 HP at 0.025 a tick is 140 ticks -- seven seconds, and a blaze's volley cycle is
+        // shorter than that. The bot is back to full before the next one lands.
+        for (int i = 0; i < 140; i++) {
+            bot.tick();
+        }
+
+        helper.assertTrue(bot.getHealth() >= max - 0.01f,
+                "seven seconds of passive regeneration must erase a blaze fireball entirely;"
+                        + " health was " + bot.getHealth() + " of " + max);
+
+        // And the rate itself, so the constant is pinned rather than implied.
+        bot.setHealth(10.0f);
+
+        for (int i = 0; i < 100; i++) {
+            bot.tick();
+        }
+
+        float expected = 10.0f + 100 * 0.025f;
+
+        helper.assertTrue(Math.abs(bot.getHealth() - expected) < 0.05f,
+                "100 ticks must regenerate 2.5 HP; expected ~" + expected
+                        + " but got " + bot.getHealth());
+
+        helper.succeed();
+    }
+
     // ---- RangedSight ------------------------------------------------------
 
     private static Vec3 at(ExtendedGameTestHelper helper, int x, int y, int z) {
