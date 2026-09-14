@@ -164,9 +164,32 @@ speed safe, and widening the trigger would need this reconsidered.
 
 Mining stays at ~30 ticks. The ~17.4-tick arc becomes a few ticks of walking at 0.4 blocks/tick
 plus a tick or two of acceleration. That predicts **roughly 33-35 ticks per block, about a quarter
-faster**.
+faster**. (It did not. See the measurement below.)
 
-It is a prediction, not a result, and it is the part most likely to be wrong: **`Bot.walk` has
+**Measured: 39.3 ticks per block**, steady state, against the 47.4 baseline — **17% faster**, in
+the same 55-block corridor with `offsets false` and sampled in the bot's own `aliveTicks` rather
+than wall-clock. Real, reproducible, and **well short of the prediction above**, which is left
+standing rather than quietly revised so the gap stays visible.
+
+The run carries its own control. `feet+2` is air in the three-block spawn pocket, so the bot jumps
+for the first stretch and walks thereafter:
+
+| Interval | ticks/block | gear |
+|---|---|---|
+| x1007→1012 | 47.0 | jumping — matches the 47.4 baseline |
+| x1012→1042 | 39.3 | walking |
+| x1042→1047 | 46.4 | descent cap engaging |
+
+Same bot, same run, same tools. That is a cleaner A/B than comparing across builds.
+
+**Where the missing ticks went.** The prediction assumed movement would cost 3-5 ticks per block at
+the 0.4 clamp. It costs **9.3**. The clamp is not the constraint: `move` is only reached on ticks
+where `checkSide` returns 1, which is after a block finishes breaking, so the bot gets a short
+burst of walk impulses and then decelerates while it mines the next one. It never sustains 0.4 for
+long enough to matter. Sustaining it would mean calling `walk` during mining ticks too — a
+different and larger change, and not obviously safe.
+
+It was a prediction, not a result, and the part most likely to be wrong was: **`Bot.walk` has
 never moved a bot in production.** Its two GameTests check the vector arithmetic and nothing else,
 so whether that velocity survives ground friction into useful movement is untested. If the arena
 comes back near 47, the design is wrong rather than the tuning, and the honest response is to
