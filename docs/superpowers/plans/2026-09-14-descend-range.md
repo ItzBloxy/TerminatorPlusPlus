@@ -359,7 +359,8 @@ Expected: BUILD SUCCESSFUL. The unit count goes from 101 to 109 (eight new tests
 ./gradlew runGameTestServer
 ```
 
-Expected: all 146 pass. In particular `a_bot_mines_down_toward_a_target_far_below` must still pass — its bot sits at `(4.5, 15, 4.5)` and its target at `(4.5, 1, 4.5)`, a horizontal distance of 0, and it satisfies `withinTargetXZ` besides, so it never consults the cap.
+Expected: all 147 pass — the suite is 147, not the 146 CLAUDE.md claims; that line is stale by one
+and Task 4 corrects it. In particular `a_bot_mines_down_toward_a_target_far_below` must still pass — its bot sits at `(4.5, 15, 4.5)` and its target at `(4.5, 1, 4.5)`, a horizontal distance of 0, and it satisfies `withinTargetXZ` besides, so it never consults the cap.
 
 - [ ] **Step 11: Commit**
 
@@ -667,7 +668,7 @@ runs.
 ./gradlew runGameTestServer 2>&1 | tee gametest-run.log
 ```
 
-Expected: 147 tests, all pass.
+Expected: 148 tests, all pass.
 
 - [ ] **Step 5: Confirm the test is actually registered**
 
@@ -768,7 +769,34 @@ until it is within 8 blocks horizontally — but bounding a straight line is not
 a path. There is still no graph, no cost function and no diagonal.
 ```
 
-- [ ] **Step 4: Verify the docs are consistent with what shipped**
+- [ ] **Step 4: Correct the test counts in `CLAUDE.md` and `README.md`**
+
+Five lines, in three files. Two of them were already wrong before this change — the GameTest suite
+was **147** on clean `master`, not the 146 both files claim — so this corrects a stale number as
+well as accounting for the tests this plan adds. Verify the numbers against an actual run rather
+than trusting these, then apply:
+
+`CLAUDE.md:52-53`:
+
+```
+./gradlew build              # compile + 109 unit tests
+./gradlew runGameTestServer  # 148 GameTests, headless, ~10s
+```
+
+`README.md:82`:
+
+```markdown
+`build` compiles and runs the 109 unit tests; `jar` writes `build/libs/tplus-5.0.0-ALPHA.jar`.
+```
+
+`README.md:363-364`:
+
+```markdown
+| **109 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
+| **148 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
+```
+
+- [ ] **Step 5: Verify the docs are consistent with what shipped**
 
 ```bash
 grep -n "descendrange" README.md docs/backlog.md docs/superpowers/plans/2026-09-12-neoforge-port-b-agent.md docs/superpowers/specs/2026-09-14-descend-range-design.md
@@ -776,18 +804,18 @@ grep -n "descendrange" README.md docs/backlog.md docs/superpowers/plans/2026-09-
 
 Expected: hits in all four. Check by eye that the default quoted in each is **8** and matches `LegacyAgent.descendRange`, and that no file still claims the README's settings table has no report form.
 
-- [ ] **Step 5: Full verification before committing**
+- [ ] **Step 6: Full verification before committing**
 
 ```bash
 ./gradlew build && ./gradlew runGameTestServer
 ```
 
-Expected: BUILD SUCCESSFUL, 109 unit tests, 147 GameTests, all passing.
+Expected: BUILD SUCCESSFUL, 109 unit tests, 148 GameTests, all passing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add README.md docs/backlog.md docs/superpowers/plans/2026-09-12-neoforge-port-b-agent.md
+git add CLAUDE.md README.md docs/backlog.md docs/superpowers/plans/2026-09-12-neoforge-port-b-agent.md
 git commit -m "docs: register the descent cap and document the command
 
 Deviation 33, the README command reference, and the backlog's

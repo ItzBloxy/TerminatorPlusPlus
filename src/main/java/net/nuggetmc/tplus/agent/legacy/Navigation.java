@@ -154,18 +154,50 @@ public final class Navigation {
     }
 
     /**
+     * Whether the bot is close enough, horizontally, to start digging toward a target below it.
+     *
+     * <p>This bound is new; upstream had none. {@code tickBot} passed {@code checkDown} one
+     * merged flag, {@code withinTargetXZ || sameXZ}, and only the first half of that is about
+     * distance — {@code sameXZ} is {@code center}'s stuckness sample, which says nothing about
+     * how far away the target is. So a bot fifty blocks out that stopped moving for one second
+     * dug straight down to the target's Y and mined across at the bottom, and digging kept it in
+     * the same column, so the flag stayed true the whole way down.
+     *
+     * <p>The {@code withinTargetXZ} term bypasses the range deliberately, and is <b>not</b>
+     * redundant: it is a 7x7 box around the <i>aim point</i>, and the aim point sits up to 3
+     * blocks from the target ({@link net.nuggetmc.tplus.motion.BotMath#circleOffset}), so it
+     * admits bots up to 8.66 blocks out. Collapsing this to {@code horizontal < range} would
+     * start vetoing bots the rest of {@code tickBot} already treats as adjacent.
+     *
+     * @param range {@link LegacyAgent#DESCEND_RANGE_UNLIMITED} restores upstream's behaviour
+     */
+    public static boolean mayDigDown(boolean withinTargetXZ, boolean sameXZ, double horizontal,
+                                     int range) {
+        return withinTargetXZ || (sameXZ && horizontal < range);
+    }
+
+    /**
      * Digs downward when the target is below and out of sight.
      *
-     * <p>Ported from {@code checkDown}. Two ways in: the bot is in the same column and more than
-     * one block above the target, or it is more than ten blocks above and within ten
+     * <p>Ported from {@code checkDown}. Two ways in: the bot is close enough horizontally and
+     * more than one block above the target, or it is more than ten blocks above and within ten
      * horizontally. Either way it mines the block it is standing on.
      *
      * <p>The second way is upstream's {@code else}, not a second {@code if}: a bot that satisfies
      * the first test but is standing on nothing gives up here rather than falling through to it.
      *
+     * <p>"Close enough horizontally" is {@link #mayDigDown} and is the one divergence in this
+     * method. Upstream took a single merged flag here and named the parameter
+     * {@code sameColumn} — a misnomer that is most of why the unbounded descent read as
+     * intentional for so long. The flag was {@code withinTargetXZ || sameXZ}: a 7x7 box around
+     * the aim point, or a stopwatch. Neither of them is a column.
+     *
+     * @param range how close, horizontally, a stuck bot must be before it may dig;
+     *              {@link LegacyAgent#DESCEND_RANGE_UNLIMITED} is upstream's behaviour
      * @return true when the bot is now mining, meaning {@code tickBot} must stop here
      */
-    public boolean checkDown(Bot bot, Vec3 targetPos, boolean sameColumn) {
+    public boolean checkDown(Bot bot, Vec3 targetPos, boolean withinTargetXZ, boolean sameXZ,
+                             int range) {
         ServerLevel level = (ServerLevel) bot.level();
         Vec3 pos = bot.position();
 
@@ -177,7 +209,13 @@ public final class Navigation {
 
         List<BlockPos> standing = bot.getStandingOn();
 
-        if (sameColumn && BotMath.floorY(pos) > BotMath.floorY(targetPos) + 1) {
+        // Upstream zeroed the Y of both locations and measured the distance between them, which
+        // is this. It sat below the first branch, which had no use for it; the first branch now
+        // does, so it moves up. Pure arithmetic on two locals, so the move changes nothing.
+        double horizontal = Math.hypot(targetPos.x - pos.x, targetPos.z - pos.z);
+
+        if (mayDigDown(withinTargetXZ, sameXZ, horizontal, range)
+                && BotMath.floorY(pos) > BotMath.floorY(targetPos) + 1) {
             if (standing.isEmpty()) {
                 return false;
             }
@@ -185,10 +223,6 @@ public final class Navigation {
             mineBelow(bot, standing.get(0));
             return true;
         }
-
-        // Upstream zeroed the Y of both locations and measured the distance between them, which
-        // is this.
-        double horizontal = Math.hypot(targetPos.x - pos.x, targetPos.z - pos.z);
 
         if (BotMath.floorY(pos) > BotMath.floorY(targetPos) + 10 && horizontal < 10) {
             if (standing.isEmpty()) {

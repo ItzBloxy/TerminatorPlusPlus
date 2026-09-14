@@ -51,8 +51,17 @@ public final class LegacyAgent extends Agent {
     private final BlockScan blockScan;
     private final SurroundingScan surroundingScan;
 
+    /** {@link #descendRange}'s "no cap", which is upstream's behaviour. */
+    public static final int DESCEND_RANGE_UNLIMITED = Integer.MAX_VALUE;
+
     /** Whether bots aim at a ring around the target rather than the target itself. */
     public boolean offsets = true;
+
+    /**
+     * How close a stuck bot must be, horizontally, before it tunnels down toward a target below
+     * it. Upstream had no such bound — see {@link Navigation#mayDigDown}.
+     */
+    public int descendRange = 8;
 
     public LegacyAgent(BotRegistry registry) {
         super(registry);
@@ -178,8 +187,12 @@ public final class LegacyAgent extends Agent {
 
             // Upstream wrote this expression three times: once as a variable for checkDown,
             // once inline as checkUp's guard, and once again for checkSide in task 21. Kept as
-            // three readings rather than one, because collapsing them would hide that the same
-            // condition is being asked for three different reasons.
+            // separate readings rather than one, because collapsing them would hide that the
+            // same condition is being asked for different reasons.
+            //
+            // checkDown is no longer one of them. It takes the two flags apart, because the
+            // horizontal cap applies to sameXZ and must not apply to withinTargetXZ —
+            // see Navigation.mayDigDown.
             boolean bothXZ = withinTargetXZ || sameXZ;
 
             // Upstream captures the head block before the XZ comparison and uses it for
@@ -206,7 +219,8 @@ public final class LegacyAgent extends Agent {
             // checkDown gets the target's TRUE position; checkUp gets the offset aim point.
             // The asymmetry is upstream's and is deliberate: digging aims at the target,
             // towering aims at the ring around it.
-            if (navigation.checkDown(bot, livingTarget.position(), bothXZ)) {
+            if (navigation.checkDown(bot, livingTarget.position(), withinTargetXZ, sameXZ,
+                    descendRange)) {
                 return;
             }
 
