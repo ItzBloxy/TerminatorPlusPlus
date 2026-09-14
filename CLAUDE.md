@@ -59,6 +59,31 @@ git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/
 `tools/` has an RCON client and the recipe for a **production** NeoForge server test. Read
 `tools/README.md` before reaching for either — the dev run is not representative of production.
 
+## Releasing
+
+A release is a `v*` tag. `.github/workflows/release.yml` fires on one, rebuilds, runs every
+GameTest on the runner, and publishes the jar. Three files carry the version, and **CI can only
+see two of them**:
+
+| File | What it carries | Checked by CI? |
+|---|---|---|
+| `gradle.properties` | `mod_version` | **Yes** — the tag must equal it, or the run fails |
+| `CHANGELOG.md` | a `## v<version>` section | **Yes** — extracted as the release notes, empty fails the run |
+| `README.md` | version badge, status block, download line, jar-name line | **No. Nothing checks it.** |
+
+**Always bring the README up to date before tagging.** It is the third of those and the only one
+nothing verifies, so it is the one that drifts — and it is the document a stranger reads. v5.2.0
+was tagged with a README still telling people to download the 5.1.0 jar, because the two files CI
+guards were updated and the one it cannot see was not.
+
+A published tag is not worth moving to fix this: re-pointing it invalidates the release the
+workflow already built and verified. Get it right before the tag instead.
+
+The same drift hits the **suite counts**, quoted in both `README.md` and this file's *Commands*
+section. Nothing checks those either. Re-read them off a real run — `./gradlew build` and
+`./gradlew runGameTestServer` both print totals — rather than trusting the number already written
+down, which is how 109 and 147 survived until they were 138 and 180.
+
 ## Verify against the patched jar, never a Paper jar
 
 Every vanilla signature goes to
