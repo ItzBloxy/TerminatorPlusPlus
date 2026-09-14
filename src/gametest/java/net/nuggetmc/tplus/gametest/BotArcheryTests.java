@@ -17,7 +17,11 @@ import net.nuggetmc.tplus.agent.legacy.Archery;
 import net.nuggetmc.tplus.agent.legacy.LegacyAgent;
 import net.nuggetmc.tplus.agent.legacy.LegacyUtils;
 import net.nuggetmc.tplus.agent.legacy.RangedSight;
+import net.nuggetmc.tplus.agent.legacy.TargetGoal;
+import net.nuggetmc.tplus.bot.EnemyTarget;
 import net.nuggetmc.tplus.bot.ranged.RangedRule;
+
+import java.util.Set;
 import net.nuggetmc.tplus.bot.Bot;
 import net.nuggetmc.tplus.bot.BotFactory;
 import net.nuggetmc.tplus.bot.BotGameProfiles;
@@ -629,6 +633,134 @@ public final class BotArcheryTests {
             helper.assertTrue(archery.lastDecision(shooter).reason() != RangedRule.TARGET_FLYING,
                     "a grounded target must not inherit the flyer's aloft count; got "
                             + archery.lastDecision(shooter));
+
+            helper.succeed();
+        } finally {
+            agent.stopAllTasks();
+            agent.setEnabled(false);
+        }
+    }
+
+    // ---- the tickBot wiring -----------------------------------------------
+
+    /**
+     * Pins one entity as the bot's target, by UUID.
+     *
+     * <p>Not {@code NEAREST_BOT}, which the other agent tests use. GameTests share a level and
+     * {@code locateTarget} has no range limit, so a nearest-anything goal can hand this bot a
+     * bot belonging to a test running at another structure position. Matching on a UUID cannot:
+     * the {@code ENTITY} branch compares ids, and no other test's bot has this one's.
+     *
+     * <p>It also makes "the target is gone" deterministic, which is what the orphan test needs.
+     */
+    private static void pinTarget(LegacyAgent agent, Bot bot, Bot target) {
+        agent.targeting().setTargetType(TargetGoal.ENTITY);
+        bot.setEnemyTarget(EnemyTarget.ofEntities(Set.of(target.getUUID()), "pinned"));
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x12x15", floor = true)
+    @TestHolder("a_ranged_bot_holds_its_ground")
+    static void a_ranged_bot_holds_its_ground(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        LegacyAgent agent = new LegacyAgent(registry);
+
+        try {
+            Bot shooter = spawn(helper, registry, new BlockPos(2, 1, 7), "Holder");
+            shooter.setBow(new ItemStack(Items.BOW));
+
+            Vec3 aloft = Vec3.atCenterOf(helper.absolutePos(new BlockPos(12, 8, 7)));
+            Bot target = aloftTarget(helper, registry, new BlockPos(12, 8, 7), "HeldFlyer");
+
+            settle(registry, 10);
+            pinTarget(agent, shooter, target);
+
+            // Warm up past the aloft threshold through Archery DIRECTLY, not through tickBot.
+            // The conventions say to prefer a direct call over ticking and waiting, and this is
+            // why: while the bot is still MELEE, tickBot runs navigation, and navigation answers
+            // an aloft target by TOWERING -- which sets an upward velocity, leaves the bot
+            // airborne most ticks, and so trips the AIRBORNE gate. The bot then only latches into
+            // RANGED on whichever tick it happens to be grounded. Warming up this way makes the
+            // measurement below deterministic; the measurement itself still goes through tickBot,
+            // which is the thing under test.
+            for (int i = 0; i < 50; i++) {
+                holdAloft(target, aloft);
+                shooter.tick();
+                agent.archery().tick(shooter, target);
+            }
+
+            helper.assertTrue(agent.archery().lastDecision(shooter).isRanged(),
+                    "precondition: expected RANGED, got " + agent.archery().lastDecision(shooter));
+
+            Vec3 before = shooter.position();
+
+            // This test deliberately ticks and waits, which the GameTest conventions warn
+            // against -- move() adds Math.random() to every jump, so a position assertion after
+            // 200 ticks usually measures the walk rather than the decision. The warning does not
+            // apply to asserting the ABSENCE of movement: if the branch is right there is no
+            // jump and no random term, and if it is wrong the bot walks off and this fails.
+            for (int i = 0; i < 100; i++) {
+                holdAloft(target, aloft);
+                shooter.tick();
+                agent.tickBot(shooter);
+            }
+
+            double moved = shooter.position().subtract(before).horizontalDistance();
+
+            helper.assertTrue(moved < 0.5,
+                    "a RANGED bot must hold position; it moved " + moved + " blocks");
+
+            helper.succeed();
+        } finally {
+            agent.stopAllTasks();
+            agent.setEnabled(false);
+        }
+    }
+
+    @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x12x15", floor = true)
+    @TestHolder("a_drawing_bot_resets_when_its_target_disappears")
+    static void a_drawing_bot_resets_when_its_target_disappears(ExtendedGameTestHelper helper) {
+        BotRegistry registry = new BotRegistry();
+        LegacyAgent agent = new LegacyAgent(registry);
+
+        try {
+            Bot shooter = spawn(helper, registry, new BlockPos(2, 1, 7), "Orphan");
+            shooter.setDefaultItem(new ItemStack(Items.NETHERITE_SWORD));
+            shooter.setBow(new ItemStack(Items.BOW));
+
+            Vec3 aloft = Vec3.atCenterOf(helper.absolutePos(new BlockPos(12, 8, 7)));
+            Bot target = aloftTarget(helper, registry, new BlockPos(12, 8, 7), "Doomed");
+
+            settle(registry, 10);
+            pinTarget(agent, shooter, target);
+
+            // Direct, for the same reason a_ranged_bot_holds_its_ground is: going through
+            // tickBot here would let navigation tower the bot and make the latch tick random.
+            for (int i = 0; i < 50; i++) {
+                holdAloft(target, aloft);
+                shooter.tick();
+                agent.archery().tick(shooter, target);
+            }
+
+            helper.assertTrue(agent.archery().isDrawing(shooter),
+                    "precondition: the bot must be mid-draw");
+
+            // tickBot returns above the ranged branch when the goal finds nothing, so without a
+            // reset beside mining.stopMining the bot holds a drawn bow forever. Invisible to
+            // every other test here, because every other test keeps its target alive.
+            target.discard();
+            registry.remove(target);
+
+            for (int i = 0; i < 5; i++) {
+                shooter.tick();
+                agent.tickBot(shooter);
+            }
+
+            helper.assertFalse(agent.archery().isDrawing(shooter),
+                    "a bot whose target vanished must drop the draw");
+            helper.assertTrue(shooter.getMainHandItem().getItem() == Items.NETHERITE_SWORD,
+                    "and get its sword back, got " + shooter.getMainHandItem());
 
             helper.succeed();
         } finally {

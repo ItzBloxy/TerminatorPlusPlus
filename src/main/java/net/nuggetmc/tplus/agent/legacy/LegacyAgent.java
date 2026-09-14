@@ -152,6 +152,12 @@ public final class LegacyAgent extends Agent {
 
         if (livingTarget == null) {
             mining.stopMining(bot);
+
+            // Beside stopMining, and for the same reason it is there. This return sits ABOVE the
+            // ranged branch, so a bot that is mid-draw when its target dies, teleports away or is
+            // filtered out by the goal would otherwise never reach archery.tick again — it would
+            // hold a drawn bow, in a phase that never advances, indefinitely.
+            archery.reset(bot);
             return;
         }
 
@@ -175,6 +181,20 @@ public final class LegacyAgent extends Agent {
                     || LegacyUtils.checkFreeSpace(level, botEye, targetPos)) {
                 attack(bot, livingTarget, pos);
             }
+        }
+
+        // Everything above this point is safety or the existing melee path; everything below it
+        // is movement. So returning here IS the hold-position decision — it is expressed as
+        // ordering rather than as a flag, which is the shape the rest of this method already has.
+        //
+        // It also settles hand contention for free: setItem(null), which restores the default
+        // item, is only called from Navigation.move and BotBehaviors.resetHand, and both sit
+        // below this return. While a bot is RANGED nothing fights the bow out of its hand, and
+        // the first resetHand after flipping back to MELEE restores the sword by itself.
+        //
+        // Deviation 38.
+        if (archery.tick(bot, livingTarget)) {
+            return;
         }
 
         boolean waterGround = BlockRules.isWater(stateAt(level, pos.add(0, -0.1, 0)))
