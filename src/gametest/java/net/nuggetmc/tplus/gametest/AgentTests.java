@@ -1031,6 +1031,61 @@ public final class AgentTests {
     }
 
     @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x30x15", floor = true)
+    @TestHolder("a_stuck_bot_will_not_tunnel_down_toward_a_distant_target")
+    static void a_stuck_bot_will_not_tunnel_down_toward_a_distant_target(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        // Something to stand on. An empty getStandingOn() is one of the three ways checkDown
+        // returns false, and the one most likely to make this test pass for the wrong reason.
+        for (int x = 1; x <= 3; x++) {
+            for (int z = 6; z <= 8; z++) {
+                helper.setBlock(new BlockPos(x, 19, z), Blocks.STONE);
+            }
+        }
+
+        // A wall across the line of sight, so neither ray reaches the target -- the second of
+        // the three. Both rays run at z = 7.5 exactly, since the bot and the target share it and
+        // checkFreeSpace steps linearly, so one column would do; three is margin. The rays cross
+        // x = 7 at about y = 12 and y = 13, well inside the span.
+        for (int y = 1; y <= 22; y++) {
+            for (int z = 6; z <= 8; z++) {
+                helper.setBlock(new BlockPos(7, y, z), Blocks.STONE);
+            }
+        }
+
+        Bot bot = spawn(helper, registry, new BlockPos(2, 20, 7), "Digger");
+
+        // settle, not run: a freshly spawned bot has no standingOn until it has ticked, and the
+        // agent must not run at all here -- this test calls the decision directly.
+        settle(registry, 10);
+
+        Navigation navigation = navigation(registry);
+        Vec3 target = helper.absoluteVec(new Vec3(13.5, 1, 7.5));
+
+        // Eleven blocks out and nineteen up. Outside a range of 8, and outside the second
+        // branch's own ten as well, so a refusal here can only be the cap.
+        boolean capped = navigation.checkDown(bot, target, false, true, 8);
+
+        helper.assertFalse(capped, "a stuck bot 11 blocks out must not tunnel down at range 8");
+        helper.assertTrue(registry.state().crackList.isEmpty(),
+                "and it must not have started breaking anything");
+
+        // The other half of the pair, on the same bot and the same geometry. If THIS fails, the
+        // setup is wrong -- a ray is reaching the target, or the bot is standing on nothing --
+        // and the assertion above proved nothing at all.
+        boolean uncapped = navigation.checkDown(bot, target, false, true,
+                LegacyAgent.DESCEND_RANGE_UNLIMITED);
+
+        helper.assertTrue(uncapped, "the same bot must tunnel down once the cap is lifted");
+        helper.assertTrue(!registry.state().crackList.isEmpty(),
+                "and must have started breaking the block underfoot");
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
     @EmptyTemplate(value = "9x30x9", floor = true)
     @TestHolder("placing_a_block_over_nothing_also_fills_the_block_below")
     static void placing_a_block_over_nothing_also_fills_the_block_below(ExtendedGameTestHelper helper) {

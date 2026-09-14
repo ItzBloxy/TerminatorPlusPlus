@@ -359,8 +359,10 @@ Expected: BUILD SUCCESSFUL. The unit count goes from 101 to 109 (eight new tests
 ./gradlew runGameTestServer
 ```
 
-Expected: all 147 pass — the suite is 147, not the 146 CLAUDE.md claims; that line is stale by one
-and Task 4 corrects it. In particular `a_bot_mines_down_toward_a_target_far_below` must still pass — its bot sits at `(4.5, 15, 4.5)` and its target at `(4.5, 1, 4.5)`, a horizontal distance of 0, and it satisfies `withinTargetXZ` besides, so it never consults the cap.
+Expected: all 146 pass. The log carries two different counts and they differ by one: `Found N
+tests` is the mod's own registered count (146, which is what CLAUDE.md documents) and `All N
+required tests passed` is the runner's (147). Read the `Found` line. In particular
+`a_bot_mines_down_toward_a_target_far_below` must still pass — its bot sits at `(4.5, 15, 4.5)` and its target at `(4.5, 1, 4.5)`, a horizontal distance of 0, and it satisfies `withinTargetXZ` besides, so it never consults the cap.
 
 - [ ] **Step 11: Commit**
 
@@ -668,7 +670,8 @@ runs.
 ./gradlew runGameTestServer 2>&1 | tee gametest-run.log
 ```
 
-Expected: 148 tests, all pass.
+Expected: `Found 147 tests` and `All 148 required tests passed` — one more than the baseline on
+both counters.
 
 - [ ] **Step 5: Confirm the test is actually registered**
 
@@ -771,16 +774,17 @@ a path. There is still no graph, no cost function and no diagonal.
 
 - [ ] **Step 4: Correct the test counts in `CLAUDE.md` and `README.md`**
 
-Five lines, in three files. Two of them were already wrong before this change — the GameTest suite
-was **147** on clean `master`, not the 146 both files claim — so this corrects a stale number as
-well as accounting for the tests this plan adds. Verify the numbers against an actual run rather
-than trusting these, then apply:
+Five lines, in three files. The GameTest suite
+is reported two ways that differ by one; the figure these files document is the `Found N tests`
+line, which was 146 on clean `master` and is 147 with this plan's test. Verify against an actual
+run rather than trusting these, then apply:
 
-`CLAUDE.md:52-53`:
+`CLAUDE.md:52-53` — the GameTest figure tracks the `Found N tests` line, which is 147 with this
+plan's test added, **not** the runner's `All 148 required tests passed`:
 
 ```
 ./gradlew build              # compile + 109 unit tests
-./gradlew runGameTestServer  # 148 GameTests, headless, ~10s
+./gradlew runGameTestServer  # 147 GameTests, headless, ~10s
 ```
 
 `README.md:82`:
@@ -793,7 +797,7 @@ than trusting these, then apply:
 
 ```markdown
 | **109 unit tests** (`src/test`) | Pure maths — vectors, offsets, the scheduler | Anything needing a world |
-| **148 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
+| **147 GameTests** (`src/gametest`) | Integration: mining, clutching, block rules | Anything needing a real client or server runtime |
 ```
 
 - [ ] **Step 5: Verify the docs are consistent with what shipped**
@@ -810,7 +814,7 @@ Expected: hits in all four. Check by eye that the default quoted in each is **8*
 ./gradlew build && ./gradlew runGameTestServer
 ```
 
-Expected: BUILD SUCCESSFUL, 109 unit tests, 148 GameTests, all passing.
+Expected: BUILD SUCCESSFUL, 109 unit tests, `Found 147 tests` in the GameTest run, all passing.
 
 - [ ] **Step 7: Commit**
 
