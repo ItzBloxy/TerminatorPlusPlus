@@ -49,8 +49,8 @@ git show paper-original:TerminatorPlus-API/src/main/java/net/nuggetmc/tplus/api/
 ## Commands
 
 ```bash
-./gradlew build              # compile + 109 unit tests
-./gradlew runGameTestServer  # 147 GameTests, headless, ~10s
+./gradlew build              # compile + 138 unit tests
+./gradlew runGameTestServer  # 180 GameTests, headless, ~10s
 ./gradlew runServer          # dev server, RCON on 25575 (password in run/server.properties)
 ./gradlew runClient          # dev client — connect to localhost
 ./gradlew jar                # the production jar, build/libs/tplus-*.jar
@@ -90,6 +90,15 @@ Empirically: `runServer` found a fatal `ConfigSync` crash that 51 GameTests pass
 manual client session found **four** bugs invisible to 132 GameTests *and* to RCON — bots spawning
 in CREATIVE (immune to arrows), entity packets sent before player info, unsigned skins that render
 nothing, and a missing skin-layer mask. Do not treat a green suite as "it works".
+
+A fifth joined them when bows shipped, and it is the sharpest example yet: `broadcastEntityData`
+passed a null `packDirty()` into `ClientboundSetEntityDataPacket`, whose encoder iterates it
+without checking. **The NPE lands on the Netty thread**, so it never reaches the server tick,
+never registers as a bot tick failure, and the server logs nothing at its own level — it just
+drops the client. And `BotConnection` swallows packets without ever encoding them, so no GameTest
+can reach that code path at all. It passed 138 unit tests, 176 GameTests and an RCON sweep, then
+disconnected the first real client within seconds. **Anything that only manifests during packet
+encoding is invisible to every tier above.**
 
 Unit tests also cost seconds where GameTests cost ten, so it is worth **designing value types to be
 testable without a world**: `EnemyTarget.matches` takes an `EntityType` and a `UUID` rather than an
