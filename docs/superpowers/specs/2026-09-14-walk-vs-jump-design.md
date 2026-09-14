@@ -1,6 +1,6 @@
 # Walk vs jump — design
 
-A tunnelling bot spends about 44% of its time airborne, achieving nothing. `Navigation.move` has
+A tunnelling bot spends about 37% of its time airborne, achieving nothing. `Navigation.move` has
 one gear — every step is a jump — and in a two-block corridor a jump is 0.2 blocks of headroom
 followed by a fall. This gives `move` a second gear, engaged by the one condition that makes the
 first one useless.
@@ -17,10 +17,24 @@ Three runs in a 55-block stone corridor, netherite tools, target 27 blocks below
 | | |
 |---|---|
 | Forward progress | **47.4 ticks per block** (also measured 46 and 48) |
-| Mining | 2 blocks per step × 13.33 ticks (120 progress ÷ netherite's 9.0) = **~26.7 ticks** |
-| Unaccounted | **~20.7 ticks, 44%** |
+| Mining | 2 blocks per step × ~15 ticks = **~30 ticks** |
+| Unaccounted | **~17.4 ticks, 37%** |
 
-The 44% is the jump arc, and it is worse than slow movement. `tickBot`'s entire decision branch is
+The mining figure is not `BREAK_COST ÷ destroy speed`. `Mining.BREAK_PERIOD` is **2**, so progress
+accrues once every two ticks, not once per tick:
+
+```
+per run   = max(1, round(speed × BREAK_PERIOD))      netherite on stone: round(9.0 × 2) = 18
+runs      = ceil(BREAK_COST ÷ per run)               ceil(120 ÷ 18)     = 7
+ticks     = runs × BREAK_PERIOD                      7 × 2              = 14
+```
+
+Plus the one-period offset from deviation 15, so ~15 ticks per block. The model is worth trusting
+because it reproduces this project's own anchor: iron gives `round(6.0 × 2) = 12` per run,
+`ceil(120 ÷ 12) = 10` runs, **20 ticks** — exactly what deviation 15 describes and what
+`iron_still_breaks_a_block_in_twenty_ticks` pins by name.
+
+The 37% is the jump arc, and it is worse than slow movement. `tickBot`'s entire decision branch is
 gated on `bot.isBotOnGround()`:
 
 ```java
@@ -75,9 +89,23 @@ private static boolean canJumpHere(Bot bot, Vec3 pos) {
 }
 ```
 
-One block read. A bot is 1.8 blocks tall, so a solid block at `feet+2` leaves 0.2 blocks of
-headroom and the 0.4 impulse is spent on the ceiling. That is the exact physical condition under
-which a jump buys nothing, which is why it is the trigger rather than a "tunnelling" state flag.
+One block read. A bot is 1.8 blocks tall (vanilla; `Bot` does not override its dimensions), so a
+solid block at `feet+2` leaves 0.2 blocks of headroom and the 0.4 impulse is spent on the ceiling.
+That is the exact physical condition under which a jump buys nothing, which is why it is the
+trigger rather than a "tunnelling" state flag.
+
+The trigger is confirmed to fire where intended, from the world the measured runs actually left
+behind. Reading the corridor out of the arena — `.` air, `#` stone:
+
+```
+y 91: #...######################   <- feet+2, solid the whole length
+y 90: #....................#####   <- head
+y 89: #...................######   <- feet
+```
+
+The bot tunnels at `y89`/`y90` and `y91` is stone from `x1004` onward, so `canJumpHere` returns
+false for every step of the run that the 47.4 figure was measured over. The only air at `feet+2` is
+the three-block spawn pocket, where the bot has not started tunnelling yet.
 
 ### Why `isAir`, and why that spelling is load-bearing
 
@@ -106,8 +134,12 @@ way gets mined rather than hopped.
 ### What does not change
 
 - `state.slow` still halves the vector. It already sets Y to 0, so flattening again is a no-op.
-- `state.noJump` still suppresses movement entirely. A bot mining downward stays put; widening that
-  to "may still walk" is a separate decision and is out of scope.
+- `state.noJump` still suppresses movement. A bot mining downward stays put; widening that to "may
+  still walk" is a separate decision and is out of scope. Precisely: only `tickBot`'s `case 1`
+  tests `noJump` — `case 2` calls `move` without checking it — but `case 2` is unreachable, because
+  `checkSide` can never return 2. That is upstream's dead arm, faithfully dead, and noted on the
+  register already. The suppression is therefore total in practice but not by construction, and
+  anything that revives `case 2` has to revisit this.
 - The descent path is untouched. `SurroundingScan` adds `noJump` for 15 ticks when it scans BELOW,
   and `tickBot` skips `move` for those bots.
 
@@ -125,13 +157,13 @@ bot saturates at 0.4 blocks/tick within a tick or two and stays there. Recorded 
 later reader does not "fix" it and silently change the speed.
 
 The clamp is roughly twice sprint speed, which would be alarming in the open. A tunnelling bot is
-mining-bound at ~27 ticks per block, so the cap never binds. The narrow trigger is what makes the
+mining-bound at ~30 ticks per block, so the cap never binds. The narrow trigger is what makes the
 speed safe, and widening the trigger would need this reconsidered.
 
 ## Expected gain, and the risk that it is zero
 
-Mining stays at ~26.7 ticks. The ~20.7-tick arc becomes a few ticks of walking at 0.4 blocks/tick
-plus a tick or two of acceleration. That predicts **roughly 30-32 ticks per block, about a third
+Mining stays at ~30 ticks. The ~17.4-tick arc becomes a few ticks of walking at 0.4 blocks/tick
+plus a tick or two of acceleration. That predicts **roughly 33-35 ticks per block, about a quarter
 faster**.
 
 It is a prediction, not a result, and it is the part most likely to be wrong: **`Bot.walk` has
@@ -195,7 +227,7 @@ The full 147 still has to run.
 2. Deviation 34 on Plan B's register. That is the list every later plan extends; do not start a new
    one.
 3. `docs/backlog.md`. Its pathfinding-visualiser section describes how bots move without saying what
-   a step costs; the 44% figure belongs there.
+   a step costs; the 37% figure belongs there.
 
 `README.md` needs nothing. There is no new command and no operator-visible setting.
 
