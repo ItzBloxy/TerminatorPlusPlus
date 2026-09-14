@@ -70,14 +70,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # A version carrying a suffix -- 5.1.0-ALPHA, 5.2.0-BETA, 5.2.0-rc1 -- is a prerelease.
-          case "$version" in
-            *-*) prerelease="--prerelease" ;;
-            *)   prerelease="" ;;
-          esac
-
+          # Deliberately NOT --prerelease, even though every version so far carries an -ALPHA
+          # suffix and the instinct is to mark it one.
+          #
+          # GitHub never labels a prerelease "Latest" -- make_latest cannot override it -- and the
+          # label goes to the newest release that is not one. While every release here is an
+          # alpha, marking them prereleases means the repository sidebar permanently advertises
+          # whichever old build happened to be published without the flag. The first tagged
+          # release did exactly that: it stranded "Latest" on 5.0.0-ALPHA while 5.1.0-ALPHA sat
+          # under "+ 1 release".
+          #
+          # The status is already stated where it counts -- the version carries -ALPHA, and the
+          # README opens with a warning block. Reinstate the flag when there is a stable line for
+          # "Latest" to point at, so an -rc does not displace it.
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            $prerelease \
+            --latest \
             "build/libs/tplus-$version.jar"
