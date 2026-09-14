@@ -61,6 +61,22 @@ Adding real survival behaviour means a health-aware branch in `tickBot` and a fl
 Plan D's armour changes how long a bot lasts and not what it does, which is worth being clear
 about: netherite buys time, and a bot still walks into the thing killing it.
 
+**Why ranged hostiles look like they cannot hurt bots at all**, investigated after a play session
+reported exactly that. Nothing is broken, and two separate vanilla-faithful mechanisms combine:
+
+- **Invulnerability frames.** `ServerPlayer.tick` sets 20 ticks of immunity after a hit, and
+  within that window `LivingEntity.hurtServer` refuses anything with `damage <= lastHurt`
+  outright. A blaze fires a three-fireball volley of identical damage, so the first lands and the
+  other two are swallowed. Ordinary vanilla player behaviour — bots drain the counter normally,
+  because `Bot.tickInternal` calls `super.tick()`.
+- **This regeneration.** 0.025 HP a tick is half a heart a second. An EASY-scaled blaze fireball
+  is 3.5 damage and is gone in 140 ticks, which is shorter than the volley cycle.
+
+So the damage does land — `a_blaze_fireball_hurts_a_bot` proves it, and
+`a_hostile_mob_can_target_a_bot` proves mobs select bots whether or not they are in the player
+list. `passive_regeneration_erases_a_fireball_in_seven_seconds` pins the rate. Changing any of it
+is the design change described above, not a bug fix.
+
 ### Bots cannot use most items
 
 A bot never ticks item use — `startUsingItem` appears in the shield path and in `Archery`, and the
