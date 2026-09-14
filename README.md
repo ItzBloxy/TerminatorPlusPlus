@@ -203,6 +203,22 @@ The difference between the two `enemytarget` modes is what happens to a zombie t
 later. `generic zombie` hunts it; `specific @e[type=zombie]` does not, because that pinned the
 zombies that existed when you typed it. `generic` takes tags too, so `#minecraft:raiders` works.
 
+**What can be targeted.** Anything a player could hit. That is mobs and players as before, and now
+also end crystals, boats, minecarts, item frames, paintings, lead knots and shulker bullets. It is
+not dropped items, experience orbs, falling blocks, area-effect clouds, display entities, markers,
+armour-stand markers or spectators — none of those can be hit by anything, so a bot ignores them
+rather than walking at one forever.
+
+> [!WARNING]
+> **An end crystal explodes at power 6, and a bot has to be within 4 blocks to swing.** A squad
+> pointed at crystals trades itself for them, one bot per crystal. Bots have no self-preservation
+> at all — nothing in the mod reads a bot's health to decide anything — so this is working as
+> built, not a bug.
+>
+> Two entities can be named and never hurt: `minecraft:tnt` and `minecraft:interaction` both look
+> attackable to the game and refuse all damage, so bots sent after either will swing at it
+> forever.
+
 ```
 /tplus mobtarget <true|false>   whether bots retaliate against mobs that hit them
 /tplus mobtarget                report it
@@ -298,6 +314,10 @@ Beyond the port itself, things the Paper plugin did not have:
   still ignored, as upstream ignored it — obsidian costs what dirt costs.
 - **`/tplus enemytarget`.** Upstream could name one player, or a list of mob *types*. There was no
   way to say "that ender dragon".
+- **Targets that are not alive.** Upstream's targeting was typed on living entities, so end
+  crystals, boats, minecarts, item frames and paintings could not be hunted at all. A bot now
+  targets whatever a player could hit. Ender dragons also take full damage rather than a quarter,
+  because bots aim at the head like everyone else.
 - **`/tplus tools`**, and both targeting commands now set the goal themselves instead of telling you
   to go and do it.
 

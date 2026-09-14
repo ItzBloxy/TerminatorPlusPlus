@@ -10031,6 +10031,46 @@ the commit message. The sanctioned ones, for reference:
     rather than spend most of a tunnel airborne. Measured at sound playing on 49% of ticks where
     it had been 7%: the walk gear did not cause this, it removed the silence that hid it.
 
+36. **Targeting is typed on `Entity`, not `LivingEntity`.** Upstream's `locateTarget` returned a
+    Bukkit `LivingEntity` scanned from `world.getLivingEntities()`, so end crystals, boats,
+    minecarts, item frames, paintings, lead knots and shulker bullets were invisible to every goal
+    — one cause, not seven — and `/tplus enemytarget specific` answered that they could not be
+    targeted. The pipeline is now `Entity` throughout, and the `ENTITY` goal scans every entity
+    gated on vanilla's own `isAttackable() && isPickable()`, the pair that decides whether a
+    player's cursor can land on something. The nine other goals keep the living scan: `Monster`,
+    `Mob`, `Raider`, `ServerPlayer` and `Bot` are all `LivingEntity`, so widening them would cost
+    more and find nothing new.
+
+    The widening was nearly free because the agent barely touches its target. Every member read on
+    it anywhere — `position`, `getEyePosition`, `isAlive`, `level`, `hurtServer` and
+    `invulnerableTime` — is declared on `Entity`, including the last two, which look like
+    `LivingEntity` members and are not. Eleven signatures moved and no method body did, which the
+    commit proves by leaving the `ENTITY` branch on the narrow scan and passing all 149 GameTests
+    unchanged before the behaviour commit widened it to 153.
+
+    Three consequences. **Two narrowings, both fixes:** armour-stand markers and spectators were
+    targetable and can be hit by nothing, so naming either was a command that succeeded and did
+    nothing; the spectator case is GameTested, the marker case is not, because
+    `ArmorStand.setMarker` is private and an access transformer for a test-only need is the worse
+    trade. **`TerminatorLocateTargetEvent.getTarget()` changed type** — both in-repo listeners
+    survive unmodified, since `RetargetHandler` only passes a `LivingEntity` into `setTarget`, and
+    the breaking direction is an addon assigning `getTarget()` to a `LivingEntity`. **`PrimedTnt`
+    and `Interaction` pass the gate and can never be damaged**, each declaring `hurtServer` final
+    returning false; accepted rather than excluded, because a hardcoded list goes stale every
+    release and ignores modded entities. Designed in
+    `docs/superpowers/specs/2026-09-14-targeting-non-living-entities-design.md`.
+37. **Bots hit the Ender Dragon's head.** `EnderDragon.hurtServer` routes to
+    `hurt(level, this.body, …)`, which opens `if (part != this.head) damage = damage / 4 +
+    Math.min(damage, 1)`. A hit worth 8 landed as 3, so bots did a third of a player's damage for
+    no reason discoverable from outside the code. `LegacyAgent.attack` now passes `dragon.head` to
+    `bot.attack`; all three gates still measure against the dragon itself, which is what the scan
+    found and what navigation aims at. Widening the scan cannot substitute for this — vanilla makes
+    players aim at a part, `EnderDragon.isPickable()` is false, and `EnderDragonPart`s live in
+    `ServerLevel`'s separate `dragonParts` map rather than the entity index. Upstream had the
+    identical behaviour. No GameTest: a live dragon in a shared test level flies, breaks blocks and
+    wants an `EndDragonFight` context, which is the same hazard that keeps the crystal test from
+    letting a bot swing.
+
 And two things found in Plan D that are **not** deviations:
 
 > `TargetGoal.PLAYER`'s description claims it falls back to `NEAREST_VULNERABLE_PLAYER` when no

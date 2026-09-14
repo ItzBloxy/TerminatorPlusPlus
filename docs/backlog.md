@@ -139,3 +139,18 @@ A hoe is the other half of the audit and is deliberately not built: 18 blocks, a
 builds or one biome, and shears already beat a netherite hoe on leaves 15.0 to 9.0.
 
 The full audit is in `docs/superpowers/specs/2026-09-13-shears-and-tool-coverage-design.md`.
+
+### `enemytarget generic` cannot check that a type is targetable
+
+`/tplus enemytarget specific` filters its selector's results through `Targeting.isTargetable` and
+tells the operator what it dropped. `generic` cannot do the same, because `isAttackable()` and
+`isPickable()` are instance state and a generic target names a type that may have no instances yet.
+So `generic minecraft:item` is accepted and then refused by the gate every tick, which is the
+"successful command that does nothing" failure the empty-tag guard beside it exists to prevent.
+
+Fixing it means a type-level table of what is targetable, maintained against every Minecraft
+release and still wrong for modded entities. The live re-check is why it has not been built.
+
+Two vanilla types would slip through such a table anyway: `minecraft:tnt` and
+`minecraft:interaction` are pickable and attackable but declare `hurtServer` final returning false,
+so they pass the gate at scan time too. See deviation 36.
