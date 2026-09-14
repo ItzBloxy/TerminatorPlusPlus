@@ -45,15 +45,39 @@ public final class Navigation {
     }
 
     /**
+     * Whether the bot has headroom worth jumping into.
+     *
+     * <p>A bot is 1.8 blocks tall, so a solid block at {@code feet+2} leaves 0.2 blocks of
+     * clearance: the 0.4 impulse is spent on the ceiling and the bot spends the whole arc
+     * airborne, during which {@code tickBot}'s grounded branch does not run and it neither
+     * scans nor mines nor decides. Measured at about 37% of a tunnelling bot's time.
+     *
+     * <p><b>The {@code isAir} spelling is load-bearing and must match
+     * {@link SurroundingScan#isWalkableStep}'s first term.</b> That method is what decides a
+     * knee-high block is a step to hop rather than a wall to mine, and it requires air at the
+     * same position. So under a ceiling it returns false and the step is mined instead — which
+     * is what makes "the bot walks into a step it cannot climb and jams" impossible rather than
+     * merely unlikely. Changing either site to {@code blocksPath} or {@code isNonSolid} looks
+     * like tidying and breaks that guarantee.
+     */
+    private static boolean canJumpHere(Bot bot, Vec3 pos) {
+        ServerLevel level = (ServerLevel) bot.level();
+        return BlockRules.isAir(level.getBlockState(BlockPos.containing(pos).above(2)));
+    }
+
+    /**
      * Hops the bot toward {@code target}.
      *
-     * <p>Ported from {@code move}. Bots do not walk: every step is a jump with a horizontal
-     * impulse, which is why they look the way they do and why {@code isBotOnGround} gates the
-     * whole method.
+     * <p>Ported from {@code move}. Bots hop rather than walk: in the open, every step is a jump
+     * with a horizontal impulse, which is why they look the way they do and why
+     * {@code isBotOnGround} gates the whole method. Under a low ceiling they walk instead —
+     * see {@link #canJumpHere}, which is this port's and not upstream's.
      *
      * <p>The neural-network branch (upstream lines 243-297) is omitted — see plan correction 4.
      * It rotated the impulse by a learned left/right bias and chose between a jump and a
-     * walk-then-jump; all of it is unreachable with the AI deferred.
+     * walk-then-jump; all of it is unreachable with the AI deferred. Note that the walk gear
+     * below is <b>not</b> a partial restoration of it: that branch only ran within 6 blocks of
+     * the target and jumped anyway ten ticks later.
      */
     public void move(Bot bot, LivingEntity livingTarget, Vec3 pos, Vec3 target) {
         MotionVec vel = MotionVec.of(target.subtract(pos)).normalize();
@@ -105,7 +129,23 @@ public final class Navigation {
 
         vel.setY(vel.getY() - Math.random() * 0.05);
 
-        bot.jump(vel);
+        // The one divergence in this method. Upstream jumped unconditionally here; its only
+        // walk path lived in the neural-network branch, was gated on `distance <= 6`, sat inside
+        // the left/right strafe logic and jumped anyway ten ticks later -- a close-quarters juke
+        // that never fired during a tunnel. The call below is upstream's, flattened vector and
+        // all; the trigger and the dropped delayed jump are this port's. See canJumpHere.
+        //
+        // vel already carries the bot's velocity, added near the top of this method, and walk()
+        // adds it a second time. That double-count is upstream's too, and it is harmless rather
+        // than overlooked: walk() clamps the sum to 0.4, so the bot saturates there within a
+        // tick or two and stays. Removing the double-count would change the speed, not fix a
+        // bug -- and the 0.4 is only safe because this branch is reached under a ceiling, where
+        // the bot is mining-bound at ~30 ticks per block and the clamp never binds.
+        if (canJumpHere(bot, pos)) {
+            bot.jump(vel);
+        } else {
+            bot.walk(vel.setY(0));
+        }
     }
 
     /**

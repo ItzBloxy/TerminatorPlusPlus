@@ -299,6 +299,12 @@ public final class SurroundingScan {
      * <p>Upstream's late rejection for the {@code _D} and {@code _D_2} offsets: with clear air
      * two above both the bot and the block, and the block not a fence or gate, it is a step.
      * Without this a bot mines every staircase it meets.
+     *
+     * <p><b>The first term is shared with {@code Navigation.canJumpHere}</b>, which decides
+     * whether a bot jumps or walks. Both ask {@code isAir} at {@code botPos.above(2)}, and the
+     * pairing is deliberate: under a ceiling this returns false, so a step is mined rather than
+     * hopped, and a walking bot is therefore never asked to climb something it cannot. Respell
+     * one of the two and bots jam against knee-high blocks inside their own tunnels.
      */
     private boolean isWalkableStep(Bot bot, ServerLevel level, Scan scan) {
         ScanOffset offset = scan.offset();

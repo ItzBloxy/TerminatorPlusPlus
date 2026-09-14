@@ -1086,6 +1086,56 @@ public final class AgentTests {
     }
 
     @GameTest(timeoutTicks = 400)
+    @EmptyTemplate(value = "15x6x15", floor = true)
+    @TestHolder("a_bot_under_a_low_ceiling_walks_instead_of_jumping")
+    static void a_bot_under_a_low_ceiling_walks_instead_of_jumping(ExtendedGameTestHelper helper) {
+        BotRegistry registry = registryWithAgent(TargetGoal.NEAREST_BOT);
+
+        Bot walker = spawn(helper, registry, new BlockPos(4, 1, 4), "Walker");
+        Bot quarry = spawn(helper, registry, new BlockPos(10, 1, 4), "Quarry");
+
+        // jump() gates on getGroundTicks() > 1, and a freshly spawned bot is not grounded at
+        // all -- without this the jump half fails for a reason that has nothing to do with the
+        // rule under test.
+        settle(registry, 10);
+
+        Navigation navigation = navigation(registry);
+        BlockPos ceiling = new BlockPos(4, 3, 4);
+
+        // The walk half runs FIRST, and the order is not cosmetic: jump() sets jumpTicks = 4,
+        // which blocks the next jump for four ticks, so testing the jump first would make the
+        // walk half pass for the wrong reason.
+        helper.setBlock(ceiling, Blocks.STONE);
+        walker.setVelocity(new MotionVec(0, 0, 0));
+
+        navigation.move(walker, quarry, walker.position(), quarry.position());
+
+        MotionVec walked = walker.getVelocity();
+
+        helper.assertTrue(walked.getY() < 0.1,
+                "under a ceiling the bot must not launch itself; y velocity was " + walked.getY());
+
+        // And it must actually have moved. Without this the test passes just as happily when
+        // move() does nothing at all, which is the failure a lone negative cannot see.
+        helper.assertTrue(Math.hypot(walked.getX(), walked.getZ()) > 0.1,
+                "it must still travel horizontally; velocity was " + walked);
+
+        // Same bot, same target, same tick -- only the ceiling changes.
+        helper.setBlock(ceiling, Blocks.AIR);
+        walker.setVelocity(new MotionVec(0, 0, 0));
+
+        navigation.move(walker, quarry, walker.position(), quarry.position());
+
+        MotionVec jumped = walker.getVelocity();
+
+        helper.assertTrue(jumped.getY() > 0.3,
+                "with headroom the bot must jump as it always did; y velocity was " + jumped.getY());
+
+        registry.reset();
+        helper.succeed();
+    }
+
+    @GameTest(timeoutTicks = 400)
     @EmptyTemplate(value = "9x30x9", floor = true)
     @TestHolder("placing_a_block_over_nothing_also_fills_the_block_below")
     static void placing_a_block_over_nothing_also_fills_the_block_below(ExtendedGameTestHelper helper) {
