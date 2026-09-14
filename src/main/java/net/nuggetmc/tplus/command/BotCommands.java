@@ -30,7 +30,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -621,6 +620,12 @@ public final class BotCommands {
         if (types.isEmpty()) {
             // An empty tag would set a target that silently matches nothing, which is the failure
             // mode this whole command exists to avoid.
+            //
+            // There is no matching check that the named type can be hit at all, and there cannot
+            // be: isAttackable and isPickable are instance state, and a generic target names a
+            // type that may have no instances yet. `generic minecraft:item` is accepted here and
+            // refused by the gate at scan time. The `specific` form has no such gap, because it
+            // has real entities to test. Recorded in docs/backlog.md.
             ctx.getSource().sendFailure(Component.literal(
                     result.asPrintable() + " is empty, so nothing would be targeted."));
             return 0;
@@ -641,32 +646,33 @@ public final class BotCommands {
             throws CommandSyntaxException {
         Collection<? extends Entity> selected = EntityArgument.getEntities(ctx, "targets");
 
-        // locateTarget returns a LivingEntity and @e matches boats and item frames. Filtering here
+        // @e matches anything at all, including entities no attack can touch. Filtering here
         // rather than at scan time means the operator is told, instead of watching a successful
-        // command do nothing.
-        List<? extends Entity> living =
-                selected.stream().filter(e -> e instanceof LivingEntity).toList();
+        // command do nothing. Targeting.isTargetable is the same rule the ENTITY scan applies
+        // every tick, called rather than restated so the two cannot drift apart.
+        List<? extends Entity> targetable =
+                selected.stream().filter(Targeting::isTargetable).toList();
 
-        if (living.isEmpty()) {
+        if (targetable.isEmpty()) {
             ctx.getSource().sendFailure(Component.literal(
                     "None of the " + selected.size() + " selected entities can be targeted."));
             return 0;
         }
 
-        int ignored = selected.size() - living.size();
+        int ignored = selected.size() - targetable.size();
 
         if (ignored > 0) {
             ctx.getSource().sendSuccess(() -> Component.literal(
                     "Ignored " + ignored + " selected entities that cannot be targeted."), false);
         }
 
-        Set<UUID> ids = living.stream().map(Entity::getUUID).collect(Collectors.toUnmodifiableSet());
-        String types = living.stream()
+        Set<UUID> ids = targetable.stream().map(Entity::getUUID).collect(Collectors.toUnmodifiableSet());
+        String types = targetable.stream()
                 .map(e -> EntityType.getKey(e.getType()).getPath())
                 .distinct().sorted().collect(Collectors.joining(", "));
 
         return applyEnemyTarget(ctx, EnemyTarget.ofEntities(ids,
-                living.size() + " entities (" + types + ")"));
+                targetable.size() + " entities (" + types + ")"));
     }
 
     /** Sets the target on every bot and switches the goal to match. */
