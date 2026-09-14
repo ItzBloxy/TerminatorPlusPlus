@@ -233,6 +233,13 @@ zero or more.
 what bots did before it existed: one that lost its footing fifty blocks from a target below would
 tunnel straight down to its level and then mine across.
 
+**A value below 10 does less than it looks like.** A second, older rule digs down whenever the bot
+is more than 10 blocks above its target *and* within 10 horizontally, and that rule is not capped.
+So for any drop deeper than 10 blocks the descent starts at 10 whatever you set — 8 and 10 are the
+same setting there. `descendrange` only bites below 10 on drops *shallower* than 10 blocks, which
+is the one case the older rule cannot reach. Setting it above 10 raises the threshold for
+everything.
+
 ### Managing bots
 
 | Command | Reports |

@@ -86,6 +86,24 @@ stuck-arm form is the same rule everywhere the two agree and the correct one whe
 It also means a flat guard would change nothing about branch 2 at any range: branch 2 already tests
 `horizontal < 10` itself.
 
+### Branch 2 sets a floor under the range, and that floor is 10
+
+Following that through, because the design as first written did not: branch 2 is an *independent*
+second chance, bounded at `horizontal < 10` and reached whenever branch 1 declines. So for a bot
+more than 10 blocks above its target, **a `descendRange` below 10 never decides anything** —
+branch 1 refuses, branch 2 accepts, and the descent starts at 10 regardless.
+
+`descendRange` therefore governs exactly two cases: drops shallower than 10 blocks, where branch 2's
+depth test excludes it, and ranges above 10, where branch 1 fires first.
+
+Confirmed in a client session rather than derived: two runs at `descendRange` 8, in a 55-block
+corridor with the target 27 below, both began the shaft at x=1047 — **10.5 blocks out, not 8** —
+with one broken floor block in the entire run.
+
+The practical consequence is that **8 and 10 are the same setting for the case this was built
+for.** 8 ships because it is the only one of the two that also constrains the shallow drops, and
+because nothing is lost by it.
+
 ### The boundary needs no hysteresis
 
 The half that matters is airtight: **digging down does not change horizontal distance**, so a bot
