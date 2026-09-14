@@ -21,10 +21,11 @@ Everything below was checked against
 level.getEntities(EntityTypeTest.forClass(LivingEntity.class), e -> true)
 ```
 
-`EndCrystal` extends `Entity` directly. So does `AbstractBoat`, `AbstractMinecart`,
-`BlockAttachedEntity` — the base of paintings, item frames and lead knots — and `ShulkerBullet`.
-None of them are in that scan, none of them can be returned through that signature, and no goal
-can ever find one.
+The entities this is about reach `Entity` by four different routes — `EndCrystal` and
+`BlockAttachedEntity` extend it directly, boats and minecarts arrive through `VehicleEntity`, item
+frames through `HangingEntity` above `BlockAttachedEntity`, and shulker bullets through
+`Projectile`. What they share is only the negative: none is a `LivingEntity`. So none is in that
+scan, none can be returned through that signature, and no goal can ever find one.
 
 The gap is visible from the command layer too. `BotCommands.enemyTargetSpecific` filters the
 selector's results with `e instanceof LivingEntity` and reports what it dropped, so
@@ -56,7 +57,7 @@ Not a `LivingEntity`, but a hit genuinely does something:
 | **Painting** | the same `BlockAttachedEntity.hurtServer` |
 | **Lead Knot** | likewise |
 | **Shulker Bullet** | `destroy()`, with a hurt sound and crit particles |
-| **Wind Charge** and anything else in `#minecraft:redirectable_projectile` | deflected |
+| **Ghast fireball**, **Wind Charge**, **Breeze Wind Charge** — `#minecraft:redirectable_projectile` in full | deflected |
 
 `BlockAttachedEntity.hurtServer` refuses when `MOB_GRIEFING` is off *and*
 `source.getEntity() instanceof Mob`. A bot is a `ServerPlayer`, not a `Mob`, so it passes that gate
@@ -77,9 +78,9 @@ gate do real work; neither is redundant.
 
 ### Two that pass the gate and never die
 
-`PrimedTnt` and `Interaction` both return `true` from `isPickable()` and inherit
-`isAttackable() == true`, but each declares `hurtServer` as `final` returning a constant `false`.
-They pass the gate and cannot be damaged by anything, ever.
+`PrimedTnt` (`isPickable()` is `!isRemoved()`) and `Interaction` (`isPickable()` is `true`) are
+both pickable and inherit `isAttackable() == true`, but each declares `hurtServer` as `final`
+returning a constant `false`. They pass the gate and cannot be damaged by anything, ever.
 
 **This is accepted rather than fixed, deliberately.** The alternatives were a maintained exclusion
 set — two entries today, stale on the next Minecraft release, and blind to modded entities — or
@@ -164,12 +165,20 @@ invincibility gate, is unaffected.
 `EnemyTarget` needs no change at all. `matches(EntityType<?>, UUID)` already takes the two fields
 rather than an entity, for the testability reason its javadoc gives, and both are on `Entity`.
 
+`TerminatorLocateTargetEvent` is the only extension point this port keeps, and both its consumers
+are in `AgentTests`: `VetoHandler`, which counts and cancels, and `RetargetHandler`, which holds a
+`LivingEntity` and hands it to `setTarget`. **Both survive the widening unmodified** — a
+`LivingEntity` argument still satisfies an `Entity` parameter. Nothing in the repository assigns
+`getTarget()` to a `LivingEntity`, which is the direction that would not compile. So the type
+change is source-compatible everywhere it is actually used today, and the breakage it could cause
+is hypothetical rather than pending.
+
 ### Only the `ENTITY` scan widens
 
 A new helper mirroring the existing one, so the two sit side by side and the difference is legible:
 
 ```java
-private static Iterable<Entity> allEntities(ServerLevel level) {
+private static List<? extends Entity> allEntities(ServerLevel level) {
     return level.getEntities(EntityTypeTest.forClass(Entity.class), e -> true);
 }
 ```
@@ -181,6 +190,12 @@ already uses, which matters more than brevity here.
 Cost is unchanged in kind: `getEntities(EntityTypeTest, predicate)` walks every entity and tests
 each, so the living scan was already O(all entities). Upstream's own header comment on the file
 this was ported from reads "Yes, this code is very unoptimized, I know."
+
+One new interaction worth naming rather than discovering: `AgentState.boats` tracks the boats
+`BotBehaviors.boatOverLava` spawns under bots crossing lava, and those become targetable like any
+other boat. An operator who sets `generic minecraft:oak_boat` can therefore have a bot destroy the
+boat it is standing in and drop into the lava it was crossing. It takes naming boats explicitly, so
+it is documented rather than guarded — the same call as the crystal.
 
 ### The gate
 
@@ -214,6 +229,12 @@ aims at. Only the recipient of `hurtServer` moves.
 `BotCommands.enemyTargetSpecific` replaces `e instanceof LivingEntity` with
 `Targeting.isTargetable(e)`. One rule, one home, two callers — and the "ignored N selected
 entities that cannot be targeted" message becomes true again.
+
+**The comment above that filter has to go with it.** It currently reads "`locateTarget` returns a
+`LivingEntity` and `@e` matches boats and item frames", which stops being an explanation and starts
+being a lie the moment boats and item frames are targetable. In a codebase whose comments exist to
+stop the next reader "fixing" something, leaving that one standing would be worse than the bug it
+described.
 
 `/tplus enemytarget generic <type>` gets no equivalent check, because there is nothing to check:
 `isAttackable` and `isPickable` are instance state, and a generic target names a type that may have
@@ -293,9 +314,10 @@ named but never hurt. "What is new here" gains the widening.
     scans all entities gated on vanilla's own `isAttackable() && isPickable()`, and the other nine
     goals keep the living scan unchanged. Three consequences to record: the `ENTITY` goal now
     correctly ignores armour-stand markers and spectators where it used to chase both;
-    `TerminatorLocateTargetEvent.getTarget()` changed type, the only thing here that would break an
-    addon if one existed; and `PrimedTnt` and `Interaction` pass the gate and can never be damaged,
-    which was accepted rather than missed.
+    `TerminatorLocateTargetEvent.getTarget()` changed type, which both in-repo listeners survive
+    unmodified and which would only break an addon that assigned the result to a `LivingEntity`;
+    and `PrimedTnt` and `Interaction` pass the gate and can never be damaged, which was accepted
+    rather than missed.
 37. **Bots hit the Ender Dragon's head.** `EnderDragon.hurtServer` routes to the body, and
     `EnderDragon.hurt` reduces any non-head hit to `damage / 4 + min(damage, 1)`, so bots did
     roughly a third of the damage a player does for no reason visible from outside. `attack` now
